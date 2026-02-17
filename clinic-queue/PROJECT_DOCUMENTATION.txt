@@ -1,0 +1,147 @@
+PROJECT OVERVIEW & DOCUMENTATION
+
+1. BUSINESS IDEA SUMMARY
+------------------------
+This project is a Clinic Queue Management System (SaaS). It allows businesses (clinics, salons, etc.) to manage their patient/customer queues digitally.
+- Businesses sign up and configure their services.
+- Patients can book appointments/places in the queue online without needing an account.
+- Staff can manage the queue (call next patient, mark completed) via a control panel.
+- Real-time updates avoid physical crowding and waiting.
+
+2. FOLDER STRUCTURE & CODE BREAKDOWN
+------------------------------------
+ROOT DIRECTORY: clinic-queue
+
+A. BACKEND (Node.js + Express + MongoDB)
+   Path: /backend
+   
+   - server.js
+     - The entry point. Connects to MongoDB, sets up middleware (CORS, Rate Limiting), and mounts API routes.
+   
+   - /models (Database Schemas)
+     - Business.js: Stores clinic details (name, slug, theme config, operating hours).
+     - User.js: Stores staff/admin accounts linked to a business.
+     - Service.js: Define services offered (e.g., "Consultation", "Cleaning") with price/duration.
+     - Appointment.js: The core record of a patient in the queue.
+
+   - /routes (API Endpoints)
+     - auth.js: Handles login/signup for business admins and staff.
+     - appointments.js: Logic for booking a slot, fetching the queue, and updating status.
+     - businesses.js: Managing business settings and fetching profiles.
+
+   - /config
+     - db.js (implied): Database connection configuration.
+
+B. FRONTEND (React + Vite)
+   Path: /frontend/src
+   
+   - /pages (Main Views)
+     - LandingPage.jsx: Home page for the platform.
+     - ExplorePage.jsx: Directory to find businesses.
+     - BookingPage.jsx: Patient interface to select a service and join the queue.
+     - QueuePage.jsx: Public display showing current queue status (Who is serving, who is next).
+     - AdminLogin.jsx: specific login page for staff.
+     - ControlPanel.jsx: Dashboard for staff to manage appointments (Next, Hold, Complete).
+     - SignupPage.jsx: For new businesses to register.
+     - StaffSearchPage.jsx: Likely for finding specific staff members or schedules.
+
+   - /services
+     - Contains API helper functions to communicate with the backend.
+
+3. WORKFLOW
+-----------
+Step 1: Onboarding
+   - A generic Business (Clinic) registers via SignupPage.jsx. 
+   - Backend creates a 'Business' document and an Admin 'User' document.
+
+Step 2: Configuration
+   - Admin logs in (AdminLogin.jsx) -> ControlPanel.jsx.
+   - Creates 'Services' (e.g., General Checkup - 15 mins).
+
+Step 3: Patient Journey
+   - Patient visits the clinic's unique link (BookingPage.jsx).
+   - Selects a Service -> Input Name & Phone.
+   - Backend creates an 'Appointment' with status 'waiting'.
+   - Patient sees their live position on QueuePage.jsx.
+
+Step 4: Clinic Operations
+   - Staff at front desk uses ControlPanel.jsx.
+   - Sees list of 'waiting' appointments.
+   - Clicks "Call Next" -> Updates Appointment status to 'serving'.
+   - Clicks "Complete" -> Updates status to 'completed'.
+
+4. MONGODB DATA FLOW & STORAGE
+------------------------------
+Data is stored in a MongoDB database (NoSQL). The application connects via Mongoose (ODM).
+
+How it works:
+- The Backend (server.js) maintains a connection pool to MongoDB.
+- When an API request comes in (e.g., "Book Appointment"), the server uses the Mongoose Models to Read/Write data.
+- Data is segregated logically by 'businessId' - allowing multiple clinics to use the same platform without mixing data.
+
+Collections (stored in MongoDB):
+1. businesses: Stores configuration and identity.
+2. users: Stores credentials for access control.
+3. services: Stores the menu of options available for booking.
+4. appointments: Stores the transactional queue data.
+
+5. ER DIAGRAM (Entity Relationships)
+------------------------------------
+(Conceptual Representation)
+
+    [BUSINESS]
+       |
+       | 1:N (One Business has many Users)
+       +-------< [USER] (Admin/Staff)
+       |
+       | 1:N (One Business has many Services)
+       +-------< [SERVICE] 
+       |            ^
+       |            | 1:N (One Service has many Appointments)
+       |            |
+       | 1:N (One Business has many Appointments)
+       +-------< [APPOINTMENT]
+
+Relationship Key:
+- A Business is the parent entity.
+- Users belong to a Business (so staff only see their clinic).
+- Appointments belong to a Business AND a specific Service.
+
+6. SUMMARY
+----------
+This system effectively digitizes the "take a number" ticket system. usage of MongoDB allows for flexible schema (easy to add new service fields) and fast reads for the real-time queue display. The separation of Backend API and Frontend React App allows for scalability and potentially adding a mobile app in the future.
+
+7. HOW TO RUN THIS PROJECT (If shared via ZIP)
+----------------------------------------------
+If you have downloaded this project as a ZIP file, follow these steps to run it.
+
+NOTE: It is recommended NOT to include the 'node_modules' folders in the ZIP file as they are large and system-dependent. The instructions below assume 'node_modules' need to be installed.
+
+1. PREREQUISITES
+   - Install Node.js (LTS version) from https://nodejs.org/
+   - Install MongoDB Community Server (and run it locally) OR have a cloud MongoDB URI ready.
+
+2. SETUP BACKEND
+   - Open a terminal/command prompt.
+   - Navigate to the backend folder:
+     cd clinic-queue/backend
+   - Install dependencies:
+     npm install
+   - Environment Setup:
+     - Ensure the `.env` file exists in the backend folder.
+     - If not, create one and add your MONGODB_URI (e.g., MONGODB_URI=mongodb://localhost:27017/clinic-queue).
+   - Start the server:
+     npm run dev
+   - You should see: "Server running on..." and "MongoDB Database connected".
+
+3. SETUP FRONTEND
+   - Open a NEW terminal window (keep the backend running).
+   - Navigate to the frontend folder:
+     cd clinic-queue/frontend
+   - Install dependencies:
+     npm install
+   - Start the React app:
+     npm run dev
+   - Open the link shown in the terminal (usually http://localhost:5173).
+
+You are now running the full application locally!
