@@ -13,6 +13,7 @@ import {
     sendPasswordResetEmail,
     signInWithCredential
 } from "firebase/auth";
+import { getMessaging, getToken, onMessage } from "firebase/messaging";
 
 const firebaseConfig = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -25,6 +26,7 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
+const messaging = typeof window !== 'undefined' ? getMessaging(app) : null;
 const googleProvider = new GoogleAuthProvider();
 
 export {
@@ -32,13 +34,9 @@ export {
     googleProvider,
     signInWithPopup,
     sendSignInLinkToEmail,
-    signInWithEmailLink,
-    isSignInWithEmailLink,
-    onAuthStateChanged,
-    signOut,
-    createUserWithEmailAndPassword,
-    signInWithEmailAndPassword,
-    sendPasswordResetEmail,
     signInWithCredential,
-    GoogleAuthProvider
+    GoogleAuthProvider,
+    messaging,
+    getToken,
+    onMessage
 };

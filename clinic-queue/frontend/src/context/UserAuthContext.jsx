@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import { auth, googleProvider, signInWithPopup, onAuthStateChanged, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, sendSignInLinkToEmail, signInWithEmailLink, isSignInWithEmailLink, signInWithCredential, GoogleAuthProvider } from '../config/firebase';
+import { auth, googleProvider, signInWithPopup, onAuthStateChanged, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, sendLoginLink as firebaseSendLoginLink, signInWithEmailLink, isSignInWithEmailLink, signInWithCredential, GoogleAuthProvider, messaging, getToken, onMessage } from '../config/firebase';
 import apiClient from '../services/axiosConfig';
 import { Capacitor } from '@capacitor/core';
 import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
@@ -18,17 +18,23 @@ export function UserAuthProvider({ children }) {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
     const [authError, setAuthError] = useState(null);
+    const [fcmToken, setFcmToken] = useState(null);
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+            console.log('🔥 Firebase Auth State Changed:', firebaseUser ? `User: ${firebaseUser.email}` : 'Signed Out');
             if (firebaseUser) {
                 try {
                     // Verify with backend and get a JWT
                     const idToken = await firebaseUser.getIdToken();
+                    console.log('🎫 Firebase ID Token obtained, length:', idToken.length);
+
+                    console.log('📡 Verifying with backend: /auth/firebase-verify...');
                     const response = await apiClient.post('/auth/firebase-verify', {
                         idToken,
                         role: 'customer'
                     });
+                    console.log('✅ Backend Verification Response:', response.data);
 
                     if (response.data.success) {
                         const userData = {
@@ -41,19 +47,30 @@ export function UserAuthProvider({ children }) {
                         };
                         setUser(userData);
                         localStorage.setItem('userToken', response.data.token);
+
+                        // Register for Push Notifications
+                        registerPushNotifications();
+
                         setAuthError(null);
+                        console.log('👤 User context updated with backend data');
                     }
                 } catch (error) {
-                    console.error('Auth sync error:', error);
+                    console.error('❌ Auth sync error:', error);
                     let errMsg = 'Failed to connect to server.';
-                    if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+
+                    if (error.response) {
+                        console.error('🛑 Backend Error Response:', error.response.status, error.response.data);
+                        errMsg = error.response.data?.error || `Server error (${error.response.status})`;
+                    } else if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
                         errMsg = 'Connection timed out. Check server/network.';
                     } else if (error.message === 'Network Error') {
                         errMsg = 'Network Error. Backend unreachable.';
                     }
+
                     setAuthError(errMsg);
                     setUser(null);
                     await signOut(auth); // Force sign out to prevent stuck state
+                    alert(`Login Error: ${errMsg}`); // Show visible alert on device
                 }
             } else {
                 setUser(null);
@@ -80,7 +97,29 @@ export function UserAuthProvider({ children }) {
     const loginWithGoogle = async () => {
         try {
             if (Capacitor.isNativePlatform()) {
-                const googleUser = await GoogleAuth.signIn();
+                // Always initialize immediately before signIn to ensure
+                // GoogleSignInClient is built (fixes NullPointerException crash)
+                try {
+                    await GoogleAuth.initialize({
+                        clientId: '547597389849-p4377e7516a141d2jg4m58emg236rdru.apps.googleusercontent.com',
+                        scopes: ['profile', 'email'],
+                        grantOfflineAccess: true,
+                    });
+                } catch (initErr) {
+                    console.error('GoogleAuth init error:', initErr);
+                }
+
+                let googleUser;
+                try {
+                    googleUser = await GoogleAuth.signIn();
+                } catch (nativeErr) {
+                    console.error('Native Google sign-in failed:', nativeErr);
+                    const msg = nativeErr?.message || '';
+                    if (msg.includes('sign_in_failed') || msg.includes('DEVELOPER_ERROR') || msg.includes('10:')) {
+                        throw new Error('Google login is not configured for this device. Please ensure the app is set up correctly in Firebase Console (SHA-1 fingerprint required).');
+                    }
+                    throw new Error('Google sign-in failed. Please check your internet connection and try again.');
+                }
                 const credential = GoogleAuthProvider.credential(googleUser.authentication.idToken);
                 await signInWithCredential(auth, credential);
             } else {
@@ -139,6 +178,37 @@ export function UserAuthProvider({ children }) {
             return response.data;
         } catch (error) {
             console.error('Login with OTP error:', error);
+            throw error;
+        }
+    };
+
+    const verifySignupOTP = async (email, otp) => {
+        try {
+            const response = await apiClient.post('/auth/verify-signup-otp', { email, otp });
+            if (response.data.success) {
+                const userData = {
+                    email,
+                    displayName: null, // Will be set in profile setup
+                    token: response.data.token,
+                    ...response.data.user
+                };
+                setUser(userData);
+                localStorage.setItem('userToken', response.data.token);
+                setAuthError(null);
+            }
+            return response.data;
+        } catch (error) {
+            console.error('Verify signup OTP error:', error);
+            throw error;
+        }
+    };
+
+    const resendVerification = async (email) => {
+        try {
+            const response = await apiClient.post('/auth/resend-verification', { email });
+            return response.data;
+        } catch (error) {
+            console.error('Resend verification error:', error);
             throw error;
         }
     };
@@ -210,6 +280,52 @@ export function UserAuthProvider({ children }) {
         }
     };
 
+    // Push Notifications
+    const registerPushNotifications = async () => {
+        try {
+            if (!messaging) return;
+
+            console.log('📡 Requesting notification permission...');
+            const permission = await Notification.requestPermission();
+
+            if (permission === 'granted') {
+                console.log('✅ Notification permission granted.');
+
+                // Get FCM Token
+                // Note: VAPID key is required for Web FCM. 
+                // Suggest user to put their VAPID key in .env
+                const token = await getToken(messaging, {
+                    vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY
+                });
+
+                if (token) {
+                    console.log('🎫 FCM Token:', token);
+                    setFcmToken(token);
+
+                    // Save to backend
+                    await apiClient.post('/auth/save-fcm-token', { fcmToken: token });
+                    console.log('✅ FCM Token saved to backend');
+                }
+            } else {
+                console.warn('⚠️ Notification permission denied');
+            }
+        } catch (error) {
+            console.error('❌ Push registration error:', error);
+        }
+    };
+
+    // Listen for foreground messages
+    useEffect(() => {
+        if (messaging) {
+            const unsubscribe = onMessage(messaging, (payload) => {
+                console.log('🔔 Foreground Message received: ', payload);
+                // Optionally show a browser toast or alert
+                alert(`${payload.notification.title}\n${payload.notification.body}`);
+            });
+            return () => unsubscribe();
+        }
+    }, []);
+
     return (
         <UserAuthContext.Provider value={{
             user,
@@ -223,6 +339,8 @@ export function UserAuthProvider({ children }) {
             resetPassword,
             requestOTP,
             loginWithOTP,
+            verifySignupOTP,
+            resendVerification,
             sendLoginLink,
             completeEmailLinkSignIn,
             superadminLogin
