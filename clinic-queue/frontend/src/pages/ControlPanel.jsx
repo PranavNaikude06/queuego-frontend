@@ -273,24 +273,34 @@ function ControlPanel() {
 
   const handleHoldPatient = async () => {
     if (!queueData?.nowServing) return;
+    setProcessing(true);
+    setError('');
     try {
       await apiClient.patch(`/${businessId}/appointments/${queueData.nowServing._id}/status`, {
         status: 'on-hold'
       });
-      init();
+      await fetchQueue();
     } catch (err) {
-      setError('Failed to hold patient');
+      console.error('Hold patient error:', err);
+      setError(err.response?.data?.error || 'Failed to hold patient');
+    } finally {
+      setProcessing(false);
     }
   };
 
   const handleRecallFromHold = async (patientId) => {
+    setProcessing(true);
+    setError('');
     try {
       await apiClient.patch(`/${businessId}/appointments/${patientId}/status`, {
         status: 'waiting'
       });
-      init();
+      await fetchQueue();
     } catch (err) {
-      setError('Failed to recall patient');
+      console.error('Recall patient error:', err);
+      setError(err.response?.data?.error || 'Failed to recall patient');
+    } finally {
+      setProcessing(false);
     }
   };
 

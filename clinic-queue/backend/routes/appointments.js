@@ -230,30 +230,30 @@ router.post('/next', async (req, res) => {
     const now = admin.firestore.FieldValue.serverTimestamp();
 
     const result = await db.runTransaction(async (t) => {
-      // 1. Mark current serving as completed
-      const servingSnap = await t.get(APPOINTMENTS.where('businessId', '==', businessId).where('status', '==', 'serving'));
+      // 1. Get current serving and all waiting — ALL READS FIRST
+      const servingSnap = await t.get(
+        APPOINTMENTS.where('businessId', '==', businessId).where('status', '==', 'serving')
+      );
+      const waitingSnap = await t.get(
+        APPOINTMENTS.where('businessId', '==', businessId).where('status', '==', 'waiting')
+      );
+
+      // 2. Mark current serving as completed — WRITES AFTER READS
       servingSnap.docs.forEach(doc => {
         t.update(doc.ref, { status: 'completed', servedAt: now });
       });
 
-      // 2. Find next waiting
-      const waitingSnap = await t.get(
-        APPOINTMENTS
-          .where('businessId', '==', businessId)
-          .where('status', '==', 'waiting')
-          .orderBy('queueNumber', 'asc')
-          .limit(1)
-      );
-
+      // 3. Sort waiting in JS and pick the first one (avoids composite index requirement)
       if (waitingSnap.empty) return null;
 
-      const nextDoc = waitingSnap.docs[0];
+      const waitingDocs = waitingSnap.docs
+        .map(doc => ({ ref: doc.ref, id: doc.id, ...doc.data() }))
+        .sort((a, b) => a.queueNumber - b.queueNumber);
+
+      const nextDoc = waitingDocs[0];
       t.update(nextDoc.ref, { status: 'serving', servedAt: now });
 
-      // 3. Find who is NOW 2nd in the waiting list (after the shift)
-      // Actually, after nextDoc becomes 'serving', the next person in line is index 1 of the ORIGINAL waiting list.
-      // But we need to query again or skip the first one.
-      return { id: nextDoc.id, ...nextDoc.data() };
+      return { id: nextDoc.id, queueNumber: nextDoc.queueNumber, patientName: nextDoc.patientName, phoneNumber: nextDoc.phoneNumber, email: nextDoc.email };
     });
 
     // Notify the person who is now 2nd in the WAITING list
@@ -261,13 +261,14 @@ router.post('/next', async (req, res) => {
       const remainingWaiting = await APPOINTMENTS
         .where('businessId', '==', businessId)
         .where('status', '==', 'waiting')
-        .orderBy('queueNumber', 'asc')
-        .limit(2)
         .get();
 
-      if (remainingWaiting.docs.length >= 2) {
-        const secondPersonDoc = remainingWaiting.docs[1];
-        const secondPerson = secondPersonDoc.data();
+      const sorted = remainingWaiting.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .sort((a, b) => a.queueNumber - b.queueNumber);
+
+      if (sorted.length >= 2) {
+        const secondPerson = sorted[1];
 
         if (secondPerson.email) {
           const bDoc = await BUSINESSES.doc(businessId).get();

@@ -34,6 +34,7 @@ export {
     googleProvider,
     signInWithPopup,
     sendSignInLinkToEmail,
+    sendSignInLinkToEmail as sendLoginLink,
     signInWithEmailLink,
     isSignInWithEmailLink,
     onAuthStateChanged,

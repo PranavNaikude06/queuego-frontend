@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import apiClient from '../services/axiosConfig';
 
 function StaffSearchPage() {
     const [businesses, setBusinesses] = useState([]);
@@ -11,7 +11,7 @@ function StaffSearchPage() {
     useEffect(() => {
         const fetchBusinesses = async () => {
             try {
-                const response = await axios.get('/api/businesses');
+                const response = await apiClient.get('/businesses');
                 setBusinesses(response.data);
             } catch (err) {
                 console.error(err);

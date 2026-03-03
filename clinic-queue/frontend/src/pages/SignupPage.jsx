@@ -85,8 +85,8 @@ function SignupPage() {
         }
 
         try {
-            // Get Firebase ID token
-            const idToken = await user.getIdToken();
+            // Get Firebase ID token (force refresh to avoid expired tokens)
+            const idToken = await user.getIdToken(true);
 
             const response = await apiClient.post('/auth/business-signup-firebase', {
                 businessName: formData.businessName,
@@ -101,7 +101,15 @@ function SignupPage() {
                 navigate(`/admin/${response.data.businessId}/control`);
             }
         } catch (err) {
-            setError(err.response?.data?.error || 'Failed to create business');
+            console.error('Business creation error:', err.response?.data || err.message);
+            const serverError = err.response?.data?.error;
+            if (serverError) {
+                setError(serverError);
+            } else if (err.message?.includes('network') || err.code === 'ERR_NETWORK') {
+                setError('Network error. Please check your internet connection and try again.');
+            } else {
+                setError('Failed to create business. Please try again.');
+            }
         } finally {
             setLoading(false);
         }
