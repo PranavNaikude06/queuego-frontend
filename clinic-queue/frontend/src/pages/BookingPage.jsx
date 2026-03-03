@@ -10,13 +10,13 @@ function BookingPage() {
   const location = useLocation();
   const { user, loading: authLoading } = useUserAuth();
 
-  const [step, setStep] = useState('select-service'); // 'select-service', 'details'
+  const [step, setStep] = useState('select-service'); // 'select-service', 'details', 'verify-phone'
   const [services, setServices] = useState([]);
   const [selectedService, setSelectedService] = useState(null);
   const [patientName, setPatientName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [email, setEmail] = useState('');
-
+  const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(null);
@@ -42,7 +42,7 @@ function BookingPage() {
     fetchServices();
   }, [businessId]);
 
-  const handleBooking = async (e) => {
+  const handleSendOTP = async (e) => {
     e.preventDefault();
     setError('');
 
@@ -58,6 +58,34 @@ function BookingPage() {
 
     setLoading(true);
     try {
+      // Send OTP via backend
+      await apiClient.post('/auth/send-otp', {
+        phoneNumber: `+91${phoneNumber}`, // Assuming India for now, or format based on input
+        // email: email // Optional: send to email too if provided?
+      });
+
+      setStep('verify-phone');
+    } catch (err) {
+      console.error('Send OTP error:', err);
+      setError(err.response?.data?.error || 'Failed to send verification code.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyAndBook = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      // 1. Verify OTP
+      await apiClient.post('/auth/verify-otp', {
+        phoneNumber: `+91${phoneNumber}`,
+        otp
+      });
+
+      // 2. Proceed with Booking
       const result = await bookAppointment(
         businessId,
         patientName.trim(),
@@ -70,10 +98,11 @@ function BookingPage() {
       setPatientName('');
       setPhoneNumber('');
       setEmail('');
-      setStep('select-service');
+      setOtp('');
+      setStep('select-service'); // Reset for next booking (or keep on success screen)
     } catch (err) {
-      console.error('Booking error:', err);
-      setError(err.response?.data?.error || 'Booking failed. Please try again.');
+      console.error('Verification/Booking error:', err);
+      setError(err.response?.data?.error || 'Verification failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -109,7 +138,13 @@ function BookingPage() {
                 key={service._id}
                 onClick={() => {
                   setSelectedService(service);
-                  setStep('details');
+                  if (!user) {
+                    // Start guest booking flow (or login redirect if mandatory)
+                    // For now, allow guest booking with OTP
+                    setStep('details');
+                  } else {
+                    setStep('details');
+                  }
                 }}
                 className="group bg-slate-800/40 hover:bg-slate-800 border border-slate-700 hover:border-indigo-500/50 p-6 rounded-2xl transition-all text-left flex justify-between items-center"
               >
@@ -148,7 +183,7 @@ function BookingPage() {
           <div className="flex justify-between items-center mb-8">
             <div>
               <h2 className="text-xl font-bold text-white">
-                {isSuccess ? 'Booking Confirmed' : 'Enter Details'}
+                {isSuccess ? 'Booking Confirmed' : step === 'verify-phone' ? 'Verify Phone' : 'Enter Details'}
               </h2>
               <p className="text-slate-400 text-sm mt-0.5">
                 {selectedService ? `For ${selectedService.name}` : ''}
@@ -157,7 +192,8 @@ function BookingPage() {
             {!isSuccess && (
               <button
                 onClick={() => {
-                  setStep('select-service');
+                  if (step === 'verify-phone') setStep('details');
+                  else setStep('select-service');
                   setError('');
                 }}
                 className="text-slate-500 hover:text-slate-300 text-sm font-bold flex items-center gap-2 transition-colors"
@@ -203,8 +239,47 @@ function BookingPage() {
                   </button>
                 </div>
               </div>
+            ) : step === 'verify-phone' ? (
+              <form onSubmit={handleVerifyAndBook} className="space-y-6">
+                <div className="text-center mb-4">
+                  <p className="text-slate-300 text-sm">
+                    Enter the code sent to <span className="font-bold text-white">+91 {phoneNumber}</span>
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase ml-1">SMS Code</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    className="w-full bg-slate-900/50 border border-slate-700 px-5 py-3.5 rounded-2xl text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 transition-all font-bold text-center text-2xl tracking-[0.5em]"
+                    placeholder="000000"
+                    value={otp}
+                    onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    required
+                    autoFocus
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading || otp.length !== 6}
+                  className="w-full py-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-lg transition-all active:scale-[0.98] shadow-lg shadow-indigo-600/20 disabled:opacity-50"
+                >
+                  {loading ? 'Verifying...' : 'Verify & Book →'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSendOTP}
+                  disabled={loading}
+                  className="w-full text-center text-sm text-indigo-400 hover:text-indigo-300 mt-2"
+                >
+                  Resend Code
+                </button>
+              </form>
             ) : (
-              <form onSubmit={handleBooking} className="space-y-5">
+              <form onSubmit={handleSendOTP} className="space-y-5">
                 {(!user || !patientName) && (
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium text-slate-400 ml-1" htmlFor="patientName">
@@ -261,20 +336,20 @@ function BookingPage() {
 
                 <button
                   type="submit"
-                  className="w-full py-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-lg transition-all active:scale-[0.98] shadow-lg shadow-emerald-600/20 disabled:opacity-50 mt-4"
+                  className="w-full py-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-lg transition-all active:scale-[0.98] shadow-lg shadow-indigo-600/20 disabled:opacity-50 mt-4"
                   disabled={loading || phoneNumber.length !== 10 || !patientName.trim()}
                 >
                   {loading ? (
                     <span className="flex items-center justify-center gap-2">
-                      Booking...
+                      Sending Code...
                     </span>
                   ) : (
-                    'Confirm Booking ✓'
+                    'Get OTP →'
                   )}
                 </button>
                 <div className="text-center">
                   <p className="text-xs text-slate-500 mt-2">
-                    Enter your phone number to confirm your booking.
+                    Verify your number to confirm booking.
                   </p>
                 </div>
               </form>
