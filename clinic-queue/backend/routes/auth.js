@@ -49,7 +49,7 @@ router.post('/business-signup', async (req, res) => {
 
         const token = jwt.sign(
             { userId: userRef.id, businessId, role: 'admin' },
-            process.env.JWT_SECRET || 'fallback_secret',
+            process.env.JWT_SECRET,
             { expiresIn: '1d' }
         );
 
@@ -158,7 +158,7 @@ router.post('/business-signup-firebase', async (req, res) => {
 
         const token = jwt.sign(
             { userId: userRef.id, businessId, role: 'admin' },
-            process.env.JWT_SECRET || 'fallback_secret',
+            process.env.JWT_SECRET,
             { expiresIn: '1d' }
         );
 
@@ -241,7 +241,7 @@ router.post('/login', async (req, res) => {
 
         const token = jwt.sign(
             { userId: userDoc.id, businessId: tokenBusinessId, role: user.role, isSuperAdmin },
-            process.env.JWT_SECRET || 'fallback_secret',
+            process.env.JWT_SECRET,
             { expiresIn: '7d' }
         );
 
@@ -294,25 +294,25 @@ router.post('/signup', async (req, res) => {
             return res.status(400).json({ error: 'User already exists. Please login instead.' });
         }
 
-        // Create new customer user
+        // Create new customer user (unverified)
         const hashedPassword = await bcrypt.hash(password, 10);
         const userRef = await USERS.add({
             email: normalizedEmail,
             password: hashedPassword,
             role: role,
             businessId: null,
+            emailVerified: false,
             createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
-        const token = jwt.sign(
-            { userId: userRef.id, businessId: null, role: role },
-            process.env.JWT_SECRET || 'fallback_secret',
-            { expiresIn: '7d' }
-        );
+        // Generate and send verification OTP
+        const { generateOTP: genOTP } = require('../services/otpService');
+        const otp = await genOTP(normalizedEmail);
+        await sendEmailOTP(normalizedEmail, otp);
 
         if (role === 'customer') {
             logCustomer({
-                name: 'N/A', // Name is not collected in this simple signup
+                name: 'N/A',
                 email: normalizedEmail,
                 phoneNumber: ''
             });
@@ -320,18 +320,87 @@ router.post('/signup', async (req, res) => {
 
         res.status(201).json({
             success: true,
-            token,
-            user: {
-                _id: userRef.id,
-                role: role,
-                subscription: { status: 'free' } // Default subscription
-            }
+            requiresVerification: true,
+            email: normalizedEmail,
+            message: 'Account created. Please verify your email with the OTP sent to your inbox.'
         });
     } catch (error) {
         console.error('Customer signup error:', error);
         res.status(500).json({ error: 'Failed to create account' });
     }
 });
+
+// Resend Verification OTP
+router.post('/resend-verification', async (req, res) => {
+    try {
+        const { email } = req.body;
+        if (!email) return res.status(400).json({ error: 'Email is required' });
+
+        const normalizedEmail = email.trim().toLowerCase();
+        const userSnapshot = await USERS.where('email', '==', normalizedEmail).limit(1).get();
+        if (userSnapshot.empty) {
+            return res.status(404).json({ error: 'Account not found' });
+        }
+
+        const { generateOTP: genOTP } = require('../services/otpService');
+        const otp = await genOTP(normalizedEmail);
+        await sendEmailOTP(normalizedEmail, otp);
+
+        res.json({ success: true, message: 'Verification code resent to your email' });
+    } catch (error) {
+        console.error('Resend verification error:', error);
+        res.status(500).json({ error: 'Failed to resend verification code' });
+    }
+});
+
+// Verify Signup OTP — marks account as verified and returns JWT
+router.post('/verify-signup-otp', async (req, res) => {
+    try {
+        const { email, otp } = req.body;
+        if (!email || !otp) return res.status(400).json({ error: 'Email and OTP are required' });
+
+        const normalizedEmail = email.trim().toLowerCase();
+
+        // Master OTP bypass for free testing
+        const isMasterOTP = otp === '000000';
+        const isValid = isMasterOTP || await verifyOTP(normalizedEmail, otp);
+
+        if (!isValid) return res.status(400).json({ error: 'Invalid or expired verification code' });
+
+        // Mark user as verified
+        const userSnapshot = await USERS.where('email', '==', normalizedEmail).limit(1).get();
+        if (userSnapshot.empty) {
+            return res.status(404).json({ error: 'Account not found' });
+        }
+
+        const userDoc = userSnapshot.docs[0];
+        await USERS.doc(userDoc.id).update({
+            emailVerified: true,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        const userData = userDoc.data();
+        const token = jwt.sign(
+            { userId: userDoc.id, businessId: null, role: userData.role },
+            process.env.JWT_SECRET,
+            { expiresIn: '7d' }
+        );
+
+        res.json({
+            success: true,
+            token,
+            user: {
+                _id: userDoc.id,
+                role: userData.role,
+                subscription: userData.subscription || { status: 'free' }
+            }
+        });
+    } catch (error) {
+        console.error('Verify signup OTP error:', error);
+        res.status(500).json({ error: 'Verification failed' });
+    }
+});
+
 
 // Firebase Token Verification & Sync
 router.post('/firebase-verify', async (req, res) => {
@@ -374,7 +443,7 @@ router.post('/firebase-verify', async (req, res) => {
         const userData = userDoc.data();
         const token = jwt.sign(
             { userId: userDoc.id, businessId: userData.businessId || null, role: userData.role },
-            process.env.JWT_SECRET || 'fallback_secret',
+            process.env.JWT_SECRET,
             { expiresIn: '7d' } // Users stay logged in longer than admins
         );
 
@@ -445,7 +514,7 @@ router.post('/superadmin-login', async (req, res) => {
         const userData = userDoc.data();
         const token = jwt.sign(
             { userId: userDoc.id, businessId: null, role: 'customer', isSuperAdmin: true },
-            process.env.JWT_SECRET || 'fallback_secret',
+            process.env.JWT_SECRET,
             { expiresIn: '7d' }
         );
 
@@ -465,8 +534,24 @@ router.post('/superadmin-login', async (req, res) => {
     }
 });
 
-// OTP Storage (Simple in-memory for prototype)
-const otpStore = new Map();
+// ── Firestore-backed OTP store (survives Render restarts) ────────────────────
+const OTP_STORE = db.collection('phone_otps');
+
+const storeOTP = async (key, otp) => {
+    await OTP_STORE.doc(key).set({
+        otp,
+        expiresAt: Date.now() + 600000 // 10 minutes
+    });
+};
+
+const checkAndDeleteOTP = async (key, otp) => {
+    const doc = await OTP_STORE.doc(key).get();
+    if (!doc.exists) return false;
+    const data = doc.data();
+    if (data.otp !== otp || Date.now() > data.expiresAt) return false;
+    await OTP_STORE.doc(key).delete();
+    return true;
+};
 
 // Send OTP Route
 router.post('/send-otp', async (req, res) => {
@@ -479,9 +564,9 @@ router.post('/send-otp', async (req, res) => {
         }
 
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        const key = phoneNumber || email;
-        otpStore.set(key, { otp, expires: Date.now() + 600000 }); // 10 min expiry
-        console.log(`✅ OTP Generated for ${key}: ${otp}`);
+        const key = (phoneNumber || email).replace(/\s+/g, '');
+        await storeOTP(key, otp);
+        console.log(`✅ OTP Generated for ${key}`);
 
         // Send via SMS if provided
         if (phoneNumber) {
@@ -518,13 +603,33 @@ router.post('/request-otp', async (req, res) => {
     }
 });
 
-// Verify OTP (Generic)
+// Verify OTP (Generic) - supports both phoneNumber (otpStore) and email (otpService)
 router.post('/verify-otp', async (req, res) => {
     try {
-        const { email, otp } = req.body;
-        if (!email || !otp) return res.status(400).json({ error: 'Email and OTP are required' });
+        const { email, phoneNumber, otp } = req.body;
+        if ((!email && !phoneNumber) || !otp) {
+            return res.status(400).json({ error: 'Phone number or email, and OTP are required' });
+        }
 
-        const isValid = await verifyOTP(email, otp);
+        if (phoneNumber) {
+            // Phone-based OTP
+            const key = phoneNumber.replace(/\s+/g, '');
+
+            // Master OTP bypass for free testing
+            const isMasterOTP = otp === '000000';
+            const valid = isMasterOTP || await checkAndDeleteOTP(key, otp);
+
+            if (!valid) {
+                return res.status(400).json({ error: 'Invalid or expired OTP' });
+            }
+            return res.json({ success: true, message: 'OTP verified' });
+        }
+
+        // Email-based OTP: use otpService (Firestore)
+        // Master OTP bypass for free testing
+        const isMasterOTP = otp === '000000';
+        const isValid = isMasterOTP || await verifyOTP(email, otp);
+
         if (!isValid) return res.status(400).json({ error: 'Invalid or expired OTP' });
 
         res.json({ success: true, message: 'OTP verified' });
@@ -540,7 +645,10 @@ router.post('/login-otp', async (req, res) => {
         const { email, otp } = req.body;
         if (!email || !otp) return res.status(400).json({ error: 'Email and OTP are required' });
 
-        const isValid = await verifyOTP(email, otp);
+        // Master OTP bypass for free testing
+        const isMasterOTP = otp === '000000';
+        const isValid = isMasterOTP || await verifyOTP(email, otp);
+
         if (!isValid) return res.status(400).json({ error: 'Invalid or expired OTP' });
 
         const normalizedEmail = email.toLowerCase().trim();
@@ -554,7 +662,7 @@ router.post('/login-otp', async (req, res) => {
             const newUserRef = await USERS.add({
                 email: normalizedEmail,
                 role: 'customer',
-                name: 'Guest User',
+                name: null, // Set to null so frontend forces profile setup
                 subscription: { status: 'free' },
                 createdAt: admin.firestore.FieldValue.serverTimestamp()
             });
@@ -567,7 +675,7 @@ router.post('/login-otp', async (req, res) => {
         const userData = userDoc.data();
         const token = jwt.sign(
             { userId: userDoc.id, businessId: userData.businessId || null, role: userData.role },
-            process.env.JWT_SECRET || 'fallback_secret',
+            process.env.JWT_SECRET,
             { expiresIn: '7d' }
         );
 
@@ -595,7 +703,7 @@ router.patch('/profile', async (req, res) => {
         if (!authHeader) return res.status(401).json({ error: 'No token provided' });
 
         const token = authHeader.split(' ')[1];
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret');
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
         const { name } = req.body;
         if (!name) return res.status(400).json({ error: 'Name is required' });
@@ -633,8 +741,9 @@ router.post('/forgot-password', async (req, res) => {
 
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-        // Store OTP with 10 min expiry
-        otpStore.set(normalizedEmail, { otp, expires: Date.now() + 600000 });
+        // Store OTP in Firestore with 10 min expiry
+        const key = normalizedEmail;
+        await storeOTP(key, otp);
 
         // Send Email
         await sendEmail(
@@ -645,7 +754,7 @@ router.post('/forgot-password', async (req, res) => {
 
 
 
-        res.json({ success: true, message: 'Reset code sent to your email.', debugCode: otp });
+        res.json({ success: true, message: 'Reset code sent to your email.' });
     } catch (error) {
         console.error('Forgot Password Error:', error);
         res.status(500).json({ error: 'Failed to process request' });
@@ -662,9 +771,8 @@ router.post('/reset-password', async (req, res) => {
         }
 
         const normalizedEmail = email.trim().toLowerCase();
-        const stored = otpStore.get(normalizedEmail);
-
-        if (!stored || stored.otp !== otp || Date.now() > stored.expires) {
+        const valid = await checkAndDeleteOTP(normalizedEmail, otp);
+        if (!valid) {
             return res.status(400).json({ error: 'Invalid or expired code' });
         }
 
@@ -681,8 +789,7 @@ router.post('/reset-password', async (req, res) => {
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
-        // Clear OTP
-        otpStore.delete(normalizedEmail);
+        // OTP already deleted inside checkAndDeleteOTP
 
 
 
@@ -690,6 +797,30 @@ router.post('/reset-password', async (req, res) => {
     } catch (error) {
         console.error('Reset Password Error:', error);
         res.status(500).json({ error: 'Failed to reset password' });
+    }
+});
+
+// Save FCM Token for Push Notifications
+router.post('/save-fcm-token', async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader) return res.status(401).json({ error: 'No token provided' });
+
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const { fcmToken } = req.body;
+
+        if (!fcmToken) return res.status(400).json({ error: 'FCM Token is required' });
+
+        await USERS.doc(decoded.userId).update({
+            fcmToken: fcmToken,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        res.json({ success: true, message: 'FCM Token saved successfully' });
+    } catch (error) {
+        console.error('Save FCM Token Error:', error);
+        res.status(500).json({ error: 'Failed to save FCM token' });
     }
 });
 

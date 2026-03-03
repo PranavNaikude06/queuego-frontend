@@ -82,12 +82,14 @@ router.patch('/services/:id', async (req, res) => {
     const { businessId, id } = req.params;
     const update = req.body;
 
-    await SERVICES.doc(id).update(update);
-    const doc = await SERVICES.doc(id).get();
-
-    if (!doc.exists) {
+    // Check existence BEFORE updating to avoid silent phantom doc creation
+    const existing = await SERVICES.doc(id).get();
+    if (!existing.exists) {
       return res.status(404).json({ error: 'Service not found' });
     }
+
+    await SERVICES.doc(id).update(update);
+    const doc = await SERVICES.doc(id).get();
 
     res.json({ _id: doc.id, ...doc.data() });
   } catch (error) {
@@ -344,12 +346,14 @@ router.patch('/:id/status', async (req, res) => {
       return res.status(400).json({ error: 'Invalid status' });
     }
 
-    await APPOINTMENTS.doc(id).update({ status });
-    const doc = await APPOINTMENTS.doc(id).get();
-
-    if (!doc.exists) {
+    // Check existence BEFORE updating to avoid silent phantom doc creation
+    const existing = await APPOINTMENTS.doc(id).get();
+    if (!existing.exists) {
       return res.status(404).json({ error: 'Appointment not found' });
     }
+
+    await APPOINTMENTS.doc(id).update({ status });
+    const doc = await APPOINTMENTS.doc(id).get();
 
     res.json({ success: true, appointment: { _id: doc.id, ...doc.data() } });
   } catch (error) {

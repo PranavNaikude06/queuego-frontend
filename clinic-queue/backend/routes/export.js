@@ -1,9 +1,9 @@
 const express = require('express');
 const router = express.Router();
+const jwt = require('jsonwebtoken');
 const { db } = require('../config/firebase');
-const ObjectsToCsv = require('objects-to-csv'); // We might need to install this or just manual stringify
 
-// Simple CSV Helper to avoid adding dependencies if possible, or we can use json2csv
+// Simple CSV Helper
 const toCSV = (data) => {
     if (!data || data.length === 0) return '';
     const headers = Object.keys(data[0]).join(',');
@@ -15,19 +15,28 @@ const toCSV = (data) => {
 const USERS = db.collection('users');
 const BUSINESSES = db.collection('businesses');
 
-// Middleware to check if user is Super Admin
-const isSuperAdmin = async (req, res, next) => {
-    // For simplicity in this protected route, we expect the requester to check auth on frontend
-    // But for security, we should check the token. 
-    // However, given the current context, we'll assume the frontend handles the primary gate 
-    // and we can add a lightweight check or trust the token passed if we implemented full auth middleware here.
-    // For now, let's proceed. authenticating the request would be better.
-    // We'll rely on the fact this is an internal admin tool request.
-    next();
+// Auth middleware — only superadmins can access export routes
+const requireSuperAdmin = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'Unauthorized: No token provided' });
+
+    const token = authHeader.split(' ')[1];
+    if (!token) return res.status(401).json({ error: 'Unauthorized: Malformed token' });
+
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        if (!decoded.isSuperAdmin) {
+            return res.status(403).json({ error: 'Forbidden: Super Admin access required' });
+        }
+        req.user = decoded;
+        next();
+    } catch (err) {
+        return res.status(401).json({ error: 'Unauthorized: Invalid or expired token' });
+    }
 };
 
 // Export Customers
-router.get('/customers', async (req, res) => {
+router.get('/customers', requireSuperAdmin, async (req, res) => {
     try {
         const snapshot = await USERS.where('role', '==', 'customer').get();
         const customers = snapshot.docs.map(doc => {
@@ -51,7 +60,7 @@ router.get('/customers', async (req, res) => {
 });
 
 // Export Businesses
-router.get('/businesses', async (req, res) => {
+router.get('/businesses', requireSuperAdmin, async (req, res) => {
     try {
         const businessSnapshot = await BUSINESSES.get();
         const businesses = [];

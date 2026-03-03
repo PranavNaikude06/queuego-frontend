@@ -1,7 +1,24 @@
 const express = require('express');
 const router = express.Router();
+const jwt = require('jsonwebtoken');
 const admin = require('firebase-admin');
 const { db } = require('../config/firebase');
+
+// Auth middleware — only superadmins can delete businesses
+const requireSuperAdmin = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'Unauthorized: No token provided' });
+    const token = authHeader.split(' ')[1];
+    if (!token) return res.status(401).json({ error: 'Unauthorized: Malformed token' });
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        if (!decoded.isSuperAdmin) return res.status(403).json({ error: 'Forbidden: Super Admin access required' });
+        req.user = decoded;
+        next();
+    } catch {
+        return res.status(401).json({ error: 'Unauthorized: Invalid or expired token' });
+    }
+};
 
 // Collections
 const BUSINESSES = db.collection('businesses');
@@ -62,8 +79,8 @@ router.patch('/:id', async (req, res) => {
     }
 });
 
-// DELETE a business and all its data
-router.delete('/:id', async (req, res) => {
+// DELETE a business and all its data — SuperAdmin only
+router.delete('/:id', requireSuperAdmin, async (req, res) => {
     const { id } = req.params;
     try {
         console.log(`🗑️ Starting deletion for business: ${id}`);

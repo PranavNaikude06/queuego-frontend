@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "547597389849-cccl5cmte8kom30sils6qnvthqg9gjdv.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.queuego.app",
+            "certificate_hash": "9a9cc31eba42639b3a22f7a5ee9cc7223cbdd8e0"
+          }
+        },
+        {
           "client_id": "547597389849-p4377e7516a141d2jg4m58emg236rdru.apps.googleusercontent.com",
           "client_type": 3
         }

@@ -4,16 +4,16 @@ import { useUserAuth } from '../context/UserAuthContext';
 import apiClient from '../services/axiosConfig';
 
 function UserLogin() {
-    const [view, setView] = useState('login'); // 'login', 'signup', 'setup-profile', 'forgot-password'
+    const [view, setView] = useState('login'); // 'login', 'signup', 'setup-profile', 'forgot-password', 'verify-signup'
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [firstName, setFirstName] = useState('');
     const [lastName, setLastName] = useState('');
+    const [signupOtp, setSignupOtp] = useState('');
+    const [signupEmail, setSignupEmail] = useState(''); // email used during signup, for verification
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
-    const [showPassword, setShowPassword] = useState(false);
-
-    const { user, authError, loginWithGoogle, updateProfile, login, signup, resetPassword, superadminLogin } = useUserAuth();
+    const { user, authError, loginWithGoogle, updateProfile, login, signup, resetPassword, superadminLogin, verifySignupOTP, resendVerification } = useUserAuth();
     const navigate = useNavigate();
     const location = useLocation();
 
@@ -24,7 +24,7 @@ function UserLogin() {
         if (authError) {
             setLoading(false);
         }
-        if (user && !user.displayName) {
+        if (user && (!user.displayName || user.displayName === 'Guest User')) {
             setView('setup-profile');
             setLoading(false);
         } else if (user && user.displayName) {
@@ -38,11 +38,14 @@ function UserLogin() {
         try {
             await loginWithGoogle();
         } catch (err) {
+            console.error("Google Login Error:", err);
             if (err.code === 'auth/popup-closed-by-user') {
                 setLoading(false);
                 return;
             }
-            setError(err.message || 'Google login failed');
+            const msg = err.message || 'Google login failed';
+            setError(msg);
+            alert(`Google Error: ${msg}`);
         } finally {
             setLoading(false);
         }
@@ -61,7 +64,9 @@ function UserLogin() {
             setView('login');
         } catch (err) {
             console.error("Reset Password Error:", err);
-            setError('Failed to send reset email. ' + err.message);
+            const msg = err.message || 'Failed to send reset email';
+            setError(msg);
+            alert(`Reset Error: ${msg}`);
         } finally {
             setLoading(false);
         }
@@ -89,18 +94,67 @@ function UserLogin() {
         setError('');
         try {
             if (view === 'signup') {
-                await signup(email, password);
+                // Only call our backend signup — it handles password hashing + OTP verification.
+                // Do NOT call Firebase createUserWithEmailAndPassword here because that triggers
+                // onAuthStateChanged → firebase-verify → creates user in Firestore, causing a
+                // "User already exists" error when /auth/signup runs immediately after.
+                const res = await apiClient.post('/auth/signup', { email, password });
+                if (res.data.requiresVerification) {
+                    setSignupEmail(email);
+                    setView('verify-signup');
+                    setLoading(false);
+                    return;
+                }
             } else {
                 await login(email, password);
             }
         } catch (err) {
-            console.error("Auth Error:", err);
-            if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
-                setError('Invalid credentials');
-            } else {
-                setError(err.message || 'Authentication failed');
+            console.error('Auth Error Details:', err);
+
+            let msg = err.message || 'Authentication failed';
+
+            // Handle backend errors (e.g. from axios)
+            if (err.response && err.response.data && err.response.data.error) {
+                msg = err.response.data.error;
+            } else if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
+                msg = 'Invalid credentials';
+            } else if (err.code === 'auth/email-already-in-use') {
+                msg = 'An account with this email already exists. Please login.';
             }
+
+            setError(msg);
+            alert(`Login/Signup Error: ${msg}`);
             setLoading(false);
+        }
+    };
+
+    const handleVerifySignup = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        setError('');
+        try {
+            await verifySignupOTP(signupEmail, signupOtp);
+            // verifySignupOTP sets user in context, useEffect will navigate
+        } catch (err) {
+            setError(err.response?.data?.error || 'Invalid or expired code. Please try again.');
+            setLoading(false);
+        }
+    };
+
+    const handleResendVerification = async () => {
+        if (resendCooldown > 0) return;
+        setError('');
+        try {
+            await resendVerification(signupEmail);
+            setResendCooldown(60);
+            const timer = setInterval(() => {
+                setResendCooldown(prev => {
+                    if (prev <= 1) { clearInterval(timer); return 0; }
+                    return prev - 1;
+                });
+            }, 1000);
+        } catch (err) {
+            setError('Failed to resend code. Please try again.');
         }
     };
 
@@ -130,7 +184,11 @@ function UserLogin() {
                             <h2 className="text-3xl font-bold text-white mb-2">Reset Password</h2>
                             <p className="text-slate-400 text-sm">Enter your email to receive a reset link.</p>
                         </>
-
+                    ) : view === 'verify-signup' ? (
+                        <>
+                            <h2 className="text-3xl font-bold text-white mb-2">Verify Email</h2>
+                            <p className="text-slate-400 text-sm">Check <span className="text-emerald-400 font-semibold">{signupEmail}</span> for your code.</p>
+                        </>
                     ) : (
                         <>
                             <h2 className="text-3xl font-bold text-white mb-2">Login</h2>
@@ -139,7 +197,7 @@ function UserLogin() {
                     )}
                 </div>
 
-                {view !== 'setup-profile' && view !== 'forgot-password' && (
+                {view !== 'setup-profile' && view !== 'forgot-password' && view !== 'verify-signup' && (
                     <div className="bg-slate-900/40 p-1.5 rounded-2xl border border-slate-700/50 mb-8 flex">
                         <button
                             onClick={() => setView('login')}
@@ -162,7 +220,41 @@ function UserLogin() {
                     </div>
                 )}
 
-                {view === 'setup-profile' ? (
+
+                {view === 'verify-signup' ? (
+                    <form onSubmit={handleVerifySignup} className="space-y-6">
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-slate-500 uppercase ml-1">Verification Code</label>
+                            <input
+                                type="text"
+                                inputMode="numeric"
+                                className="w-full bg-slate-900/50 border border-slate-700 px-5 py-3.5 rounded-2xl text-white placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all font-bold text-center text-2xl tracking-[0.5em]"
+                                placeholder="000000"
+                                value={signupOtp}
+                                onChange={(e) => setSignupOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                required
+                                autoFocus
+                            />
+                            <p className="text-xs text-slate-500 text-center mt-1">Enter the 6-digit code sent to your email</p>
+                        </div>
+                        <button
+                            type="submit"
+                            disabled={loading || signupOtp.length !== 6}
+                            className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-bold py-4 rounded-2xl transition-all shadow-lg shadow-emerald-500/20 active:scale-[0.98] disabled:opacity-50"
+                        >
+                            {loading ? 'Verifying...' : 'Verify & Continue →'}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleResendVerification}
+                            disabled={resendCooldown > 0}
+                            className="w-full text-slate-500 hover:text-emerald-400 text-sm mt-2 transition-colors disabled:opacity-50"
+                        >
+                            {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Didn't get the code? Resend"}
+                        </button>
+                    </form>
+                ) : view === 'setup-profile' ? (
+
                     <form onSubmit={handleUpdateProfile} className="space-y-6">
                         <div className="space-y-2">
                             <label className="text-xs font-bold text-slate-500 uppercase ml-1">First Name</label>
