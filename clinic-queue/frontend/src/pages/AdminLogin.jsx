@@ -12,6 +12,36 @@ function AdminLogin() {
     const navigate = useNavigate();
 
     useEffect(() => {
+        // If superadmin is already logged in via userToken, auto-redirect to control panel
+        const userToken = localStorage.getItem('userToken') || localStorage.getItem('token');
+        if (userToken) {
+            try {
+                const payload = JSON.parse(atob(userToken.split('.')[1]));
+                if (payload.isSuperAdmin) {
+                    // Copy user token as admin token so ControlPanel can use it
+                    localStorage.setItem('adminToken', userToken);
+                    navigate(`/admin/${businessId}/control`);
+                    return;
+                }
+            } catch (e) {
+                // ignore
+            }
+        }
+
+        // Also check if an existing adminToken already grants access
+        const existingAdmin = localStorage.getItem('adminToken');
+        if (existingAdmin) {
+            try {
+                const payload = JSON.parse(atob(existingAdmin.split('.')[1]));
+                if (payload.isSuperAdmin || payload.businessId === businessId) {
+                    navigate(`/admin/${businessId}/control`);
+                    return;
+                }
+            } catch (e) {
+                // ignore
+            }
+        }
+
         const fetchBusiness = async () => {
             try {
                 const res = await apiClient.get(`/businesses/${businessId}`);

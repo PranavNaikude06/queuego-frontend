@@ -48,6 +48,11 @@ function ControlPanel() {
   const [location, setLocation] = useState(null);
   const [locating, setLocating] = useState(false);
 
+  // Trial State
+  const [trialExpired, setTrialExpired] = useState(false);
+  const [trialDaysLeft, setTrialDaysLeft] = useState(null);
+  const [isSuperAdminAccess, setIsSuperAdminAccess] = useState(false);
+
 
   const fetchServices = useCallback(async () => {
     try {
@@ -186,9 +191,10 @@ function ControlPanel() {
         // Decode JWT to check businessId
         try {
           const payload = JSON.parse(atob(token.split('.')[1]));
-          if (payload.businessId !== businessId) {
+          const isSuperAdmin = payload.isSuperAdmin === true;
+          if (!isSuperAdmin && payload.businessId !== businessId) {
             setError('You are not authorized to access this business');
-            setTimeout(() => navigate('/explore'), 2000);
+            setTimeout(() => navigate('/'), 2000);
             return;
           }
         } catch (e) {
@@ -205,6 +211,48 @@ function ControlPanel() {
         ]);
         setQueueData(qData);
         setBusinessName(bData.name);
+
+        // Check trial status
+        const sub = bData.subscription;
+        let trialStartRaw = sub?.trialStartDate;
+
+        // Fallback to createdAt if trialStartDate is missing (for existing businesses)
+        if (!trialStartRaw && bData.createdAt) {
+          trialStartRaw = bData.createdAt;
+        }
+
+        if (trialStartRaw) {
+          // Handle Firestore Timestamp object or ISO string
+          let startDate;
+          if (trialStartRaw._seconds) {
+            startDate = new Date(trialStartRaw._seconds * 1000);
+          } else {
+            startDate = new Date(trialStartRaw);
+          }
+
+          const now = new Date();
+          const diffMs = now - startDate;
+          const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+          const remaining = 15 - diffDays;
+          setTrialDaysLeft(Math.max(0, remaining));
+
+          if (sub?.status === 'paid') {
+            setTrialDaysLeft(null); // Paid user
+          } else if (remaining <= 0) {
+            // Check if superadmin — they bypass trial
+            try {
+              const tkn = localStorage.getItem('adminToken') || localStorage.getItem('userToken');
+              const pl = JSON.parse(atob(tkn.split('.')[1]));
+              if (pl.isSuperAdmin) {
+                setIsSuperAdminAccess(true);
+              } else {
+                setTrialExpired(true);
+              }
+            } catch {
+              setTrialExpired(true);
+            }
+          }
+        }
 
         // Populate Settings Form
         setSettingsForm({
@@ -316,19 +364,75 @@ function ControlPanel() {
   };
 
   const handleDeleteBusiness = async () => {
-    if (confirmSlug !== businessData.slug) {
-      setError('Business slug does not match.');
+    if (confirmName !== businessName) {
+      setError('Business name does not match.');
       return;
     }
 
-    setIsDeleting(true);
+    setProcessing(true);
     try {
       await apiClient.delete(`/businesses/${businessId}`);
       alert('Business deleted successfully.');
-      navigate('/explore');
+      navigate('/');
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to delete business.');
-      setIsDeleting(false);
+      setProcessing(false);
+    }
+  };
+
+  const handlePayment = async () => {
+    setProcessing(true);
+    try {
+      // 1. Create order on backend
+      const { data: orderData } = await apiClient.post('/payments/create-order', {
+        amount: 199,
+        businessId: businessId
+      });
+
+      const options = {
+        key: orderData.key_id,
+        amount: orderData.amount,
+        currency: 'INR',
+        name: 'QueueGo Subscription',
+        description: `Premium for ${businessName}`,
+        order_id: orderData.order_id,
+        handler: async (response) => {
+          try {
+            // 2. Verify payment on backend
+            await apiClient.post('/payments/verify-payment', {
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_signature: response.razorpay_signature,
+              businessId: businessId
+            });
+
+            alert('Subscription activated successfully!');
+            // Re-initialize to fetch new status
+            window.location.reload();
+          } catch (err) {
+            console.error('Verification failed:', err);
+            setError('Payment verification failed. Please contact support.');
+          }
+        },
+        prefill: {
+          name: businessName,
+          email: '',
+          contact: ''
+        },
+        theme: {
+          color: '#10b981'
+        },
+        modal: {
+          ondismiss: () => setProcessing(false)
+        }
+      };
+
+      const rzp1 = new window.Razorpay(options);
+      rzp1.open();
+    } catch (err) {
+      console.error('Payment initialization failed:', err);
+      setError('Failed to start payment process. Make sure you are online.');
+      setProcessing(false);
     }
   };
 
@@ -340,9 +444,53 @@ function ControlPanel() {
     );
   }
 
+  if (trialExpired) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6">
+        <div className="max-w-md w-full bg-slate-800/90 backdrop-blur-xl rounded-3xl border border-red-500/30 p-10 shadow-2xl text-center space-y-6">
+          <div className="text-6xl">⏰</div>
+          <h2 className="text-3xl font-bold text-white">Free Trial Expired</h2>
+          <p className="text-slate-400 text-sm leading-relaxed">
+            Your 15-day free trial has ended. To continue managing your queue and accessing all features, please subscribe.
+          </p>
+          <div className="bg-slate-900/60 rounded-2xl border border-slate-700 p-6 space-y-2">
+            <div className="text-emerald-400 font-bold text-3xl">₹199<span className="text-base text-slate-500 font-normal">/month</span></div>
+            <p className="text-slate-500 text-xs">Unlimited queue management, QR codes, analytics & more</p>
+          </div>
+          <button
+            onClick={handlePayment}
+            disabled={processing}
+            className="block w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold text-lg hover:shadow-lg hover:shadow-emerald-500/25 transition-all active:scale-95 disabled:opacity-50"
+          >
+            {processing ? 'Processing...' : 'Pay ₹199 to Continue →'}
+          </button>
+          <button
+            onClick={() => navigate('/')}
+            className="text-slate-500 hover:text-white text-sm transition-colors"
+          >
+            ← Back to Home
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 p-4 md:p-8">
       <div className="max-w-6xl mx-auto space-y-6 relative">
+        {/* Trial Days Remaining Banner */}
+        {trialDaysLeft !== null && trialDaysLeft <= 15 && !isSuperAdminAccess && (
+          <div className={`flex items-center justify-between p-3 rounded-xl border text-sm font-bold ${trialDaysLeft <= 3 ? 'bg-red-500/10 border-red-500/30 text-red-400' : 'bg-amber-500/10 border-amber-500/30 text-amber-400'}`}>
+            <span>⏳ {trialDaysLeft} day{trialDaysLeft !== 1 ? 's' : ''} left in your free trial</span>
+            <button
+              onClick={handlePayment}
+              disabled={processing}
+              className="text-xs bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-lg hover:bg-emerald-500/30 transition-colors disabled:opacity-50"
+            >
+              {processing ? '...' : 'Subscribe — ₹199/mo'}
+            </button>
+          </div>
+        )}
         {/* QR Code Modal */}
         {showQR && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">

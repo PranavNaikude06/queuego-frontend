@@ -43,6 +43,7 @@ export function UserAuthProvider({ children }) {
                             displayName: firebaseUser.displayName,
                             photoURL: firebaseUser.photoURL,
                             token: response.data.token,
+                            getIdToken: async (forceRefresh) => await firebaseUser.getIdToken(forceRefresh),
                             ...response.data.user
                         };
                         setUser(userData);

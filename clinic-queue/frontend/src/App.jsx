@@ -9,7 +9,6 @@ import AdminLogin from './pages/AdminLogin';
 import UserLogin from './pages/UserLogin';
 import LandingPage from './pages/LandingPage';
 import SignupPage from './pages/SignupPage';
-import ExplorePage from './pages/ExplorePage';
 import StaffSearchPage from './pages/StaffSearchPage';
 import AuthCallback from './pages/AuthCallback';
 import VerifyEmail from './pages/VerifyEmail';
@@ -81,7 +80,6 @@ function ProfileDropdown() {
           </div>
           <div className="py-1">
             <Link to="/staff-search" onClick={() => setShowDropdown(false)} className="block px-3 py-2 text-slate-300 hover:bg-slate-700 text-sm">Staff Login</Link>
-            <Link to="/explore" onClick={() => setShowDropdown(false)} className="block px-3 py-2 text-slate-300 hover:bg-slate-700 text-sm">Explore</Link>
             <Link to="/signup" onClick={() => setShowDropdown(false)} className="block px-3 py-2 text-slate-300 hover:bg-slate-700 text-sm">For Business</Link>
           </div>
           <div className="border-t border-slate-700">
@@ -149,64 +147,7 @@ function SessionManager() {
   return null;
 }
 
-function TenantLayout() {
-  const { businessId } = useParams();
-  const location = useLocation();
-
-  const getLinkClass = (path) => {
-    const isActive = location.pathname.endsWith(path);
-    const baseClass = "flex items-center gap-2 px-5 py-2.5 rounded-lg transition-all duration-200 font-medium text-sm border";
-    const activeClass = "bg-slate-700 text-white border-slate-600 shadow-lg shadow-black/20";
-    const inactiveClass = "text-slate-400 border-transparent hover:bg-slate-800 hover:text-slate-200";
-    return `${baseClass} ${isActive ? activeClass : inactiveClass}`;
-  };
-
-  return (
-    <div className="min-h-screen text-slate-200 selection:bg-indigo-500/30 selection:text-indigo-200 relative pt-[env(safe-area-inset-top)]">
-      <div className="absolute top-4 right-4 z-50 mt-[env(safe-area-inset-top)]">
-        <Link
-          to={`/admin/${businessId}/login`}
-          className={`flex items-center gap-2 px-4 py-2 md:px-6 md:py-3 rounded-full text-xs md:text-base font-bold uppercase tracking-wider transition-all duration-300 ${location.pathname.includes('/login') || location.pathname.includes('/control')
-            ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-900/60'
-            : 'bg-slate-800/50 text-slate-500 border border-slate-700/50 hover:bg-slate-800 hover:text-slate-300 shadow-lg'
-            }`}
-        >
-          <span className="w-2 h-2 md:w-2.5 md:h-2.5 rounded-full bg-current opacity-70"></span>
-          <span className="hidden md:inline">Admin Panel</span>
-          <span className="md:hidden text-lg">⚙️</span>
-        </Link>
-      </div>
-
-      <div className="max-w-5xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
-        <header className="flex flex-col items-center justify-center gap-2 mb-8">
-          <div className="flex items-center gap-3">
-            <img src="/logo.svg" alt="QueueGo Logo" className="h-14 w-auto object-contain mt-4" />
-            <h1 className="text-3xl font-bold text-white tracking-tight">
-              QueueGo
-            </h1>
-          </div>
-        </header>
-
-        <nav className="flex justify-center gap-3 mb-10 overflow-x-auto py-2">
-          <Link to={`/join/${businessId}`} className={getLinkClass(`/join/${businessId}`)}>
-            <span className="opacity-80">📝</span> Book
-          </Link>
-          <Link to={`/display/${businessId}`} className={getLinkClass(`/display/${businessId}`)}>
-            <span className="opacity-80">📺</span> Queue
-          </Link>
-        </nav>
-
-        <div className="fade-in-up">
-          <Outlet />
-        </div>
-
-        <footer className="mt-16 text-center text-slate-600 text-sm border-t border-slate-800 pt-8">
-          <p>@ QueueGo 2026</p>
-        </footer>
-      </div>
-    </div>
-  );
-}
+// Removed TenantLayout completely as we want isolated web app instances
 
 function BackButtonHandler() {
   const navigate = useNavigate();
@@ -231,10 +172,35 @@ function BackButtonHandler() {
   return null;
 }
 
+function DeepLinkHandler() {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const linkListener = CapacitorApp.addListener('appUrlOpen', data => {
+      console.log('App opened with URL:', data.url);
+      try {
+        const url = new URL(data.url);
+        if (url.hostname === 'backend-8gmt.onrender.com' && url.pathname.startsWith('/join/')) {
+          navigate(url.pathname);
+        }
+      } catch (e) {
+        console.error('Invalid deep link:', e);
+      }
+    });
+
+    return () => {
+      linkListener.then(l => l.remove());
+    };
+  }, [navigate]);
+
+  return null;
+}
+
 function App() {
   return (
     <UserAuthProvider>
       <Router>
+        <DeepLinkHandler />
         <BackButtonHandler />
         <Routes>
           {/* Public Routes */}
@@ -246,15 +212,12 @@ function App() {
           {/* Protected Consumer Routes */}
           <Route element={<UserProtectedRoute />}>
             <Route path="/" element={<LandingPageLayout><LandingPage /></LandingPageLayout>} />
-            <Route path="/explore" element={<LandingPageLayout><ExplorePage /></LandingPageLayout>} />
             <Route path="/signup" element={<LandingPageLayout><SignupPage /></LandingPageLayout>} />
-
-            {/* Dynamic Tenant Routes (Inside Auth) */}
-            <Route element={<TenantLayout />}>
-              <Route path="join/:businessId" element={<BookingPage />} />
-              <Route path="display/:businessId" element={<QueuePage />} />
-            </Route>
           </Route>
+
+          {/* Standalone Web App Routes for QR (No Global Navigation Layout) */}
+          <Route path="/join/:businessId" element={<BookingPage />} />
+          <Route path="/display/:businessId" element={<QueuePage />} />
 
           {/* Admin Routes (Separate Auth) */}
           <Route path="/admin/:businessId">

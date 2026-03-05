@@ -14,8 +14,18 @@ function QueuePage() {
   const [utr, setUtr] = useState('');
   const [submittingPayment, setSubmittingPayment] = useState(false);
 
-  // Premium Check
-  const isPremium = user?.subscription?.status === 'premium';
+  // Premium Check — business owners & superadmin always bypass
+  const isBusinessOwner = (() => {
+    const adminToken = localStorage.getItem('adminToken');
+    const userToken = localStorage.getItem('userToken') || localStorage.getItem('token');
+    const tokenToCheck = adminToken || userToken;
+    if (!tokenToCheck) return false;
+    try {
+      const payload = JSON.parse(atob(tokenToCheck.split('.')[1]));
+      return payload.isSuperAdmin === true || payload.businessId === businessId;
+    } catch { return false; }
+  })();
+  const isPremium = isBusinessOwner || user?.subscription?.status === 'premium';
 
   const abortControllerRef = useRef(null);
 
@@ -173,17 +183,7 @@ function QueuePage() {
 
   return (
     <div className="flex flex-col space-y-4 p-4 md:p-8 min-h-screen bg-slate-900 text-slate-200">
-      {/* Back Button */}
-      <div className="flex items-center">
-        <button
-          onClick={() => window.history.back()}
-          className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors font-medium px-4 py-2 rounded-lg hover:bg-slate-800"
-        >
-          <span>←</span> Back
-        </button>
-      </div>
-
-      <div className="grid lg:grid-cols-3 gap-6 flex-grow">
+      <div className="grid lg:grid-cols-3 gap-6 flex-grow mt-4">
         {/* Now Serving Section - Takes 1 column */}
         <div className="space-y-4 lg:col-span-1">
           <div className="rounded-xl p-8 md:p-12 text-center bg-slate-800 border border-slate-700 h-full flex flex-col justify-center">
@@ -231,7 +231,7 @@ function QueuePage() {
                     onClick={() => setShowPayModal(true)}
                     className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold hover:shadow-lg hover:shadow-emerald-500/20 transition-all active:scale-95"
                   >
-                    Unlock for ₹100
+                    Start Free Trial — then ₹199/mo
                   </button>
                 ) : (
                   <button

@@ -106,6 +106,15 @@ function UserLogin() {
                     return;
                 }
             } else {
+                // Check if this is the superadmin email — use special login flow
+                const normalizedEmail = email.trim().toLowerCase();
+                if (normalizedEmail === 'admin@owner.com') {
+                    const result = await superadminLogin(email, password);
+                    if (result.success) {
+                        navigate('/', { replace: true });
+                    }
+                    return;
+                }
                 await login(email, password);
             }
         } catch (err) {

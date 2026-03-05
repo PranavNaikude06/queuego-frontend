@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
-import { useUserAuth } from '../context/UserAuthContext';
 import { bookAppointment } from '../services/api';
 import apiClient from '../services/axiosConfig';
 
@@ -8,41 +7,59 @@ function BookingPage() {
   const { businessId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, loading: authLoading } = useUserAuth();
 
-  const [step, setStep] = useState('select-service'); // 'select-service', 'details', 'verify-phone'
+  const [step, setStep] = useState('select-service'); // 'select-service', 'details'
   const [services, setServices] = useState([]);
+  const [businessName, setBusinessName] = useState('');
+  const [businessLocation, setBusinessLocation] = useState(null);
   const [selectedService, setSelectedService] = useState(null);
   const [patientName, setPatientName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [email, setEmail] = useState('');
-  const [otp, setOtp] = useState('');
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(null);
 
   useEffect(() => {
-    if (user) {
-      setPatientName(user.displayName || user.name || '');
-      setEmail(user.email || '');
-      setPhoneNumber(user.phoneNumber || ''); // Pre-fill phone if available
-    }
-  }, [user]);
-
-  useEffect(() => {
-    // Fetch services for this business
+    // Fetch services for this business and business name
     const fetchServices = async () => {
       try {
-        const response = await apiClient.get(`/${businessId}/appointments/services`);
-        setServices(response.data);
+        const [servicesRes, businessRes] = await Promise.all([
+          apiClient.get(`/${businessId}/appointments/services`),
+          apiClient.get(`/businesses/${businessId}`) // Assuming this route exists to get business details
+        ]);
+        setServices(servicesRes.data);
+        setBusinessName(businessRes.data.name);
+
+        // Ensure we load the business location parameters
+        if (businessRes.data.location?.coordinates) {
+          const [lng, lat] = businessRes.data.location.coordinates;
+          setBusinessLocation({ lat, lng });
+        }
       } catch (err) {
-        console.error('Error fetching services:', err);
+        console.error('Error fetching details:', err);
       }
     };
     fetchServices();
   }, [businessId]);
 
-  const handleSendOTP = async (e) => {
+  // Haversine formula to calculate distance in meters between two lat/lng coordinates
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371e3; // Earth radius in meters
+    const toRadians = (deg) => deg * (Math.PI / 180);
+    const dLat = toRadians(lat2 - lat1);
+    const dLon = toRadians(lon2 - lon1);
+
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c; // Distance in meters
+  };
+
+  const handleBooking = async (e) => {
     e.preventDefault();
     setError('');
 
@@ -57,35 +74,46 @@ function BookingPage() {
     }
 
     setLoading(true);
-    try {
-      // Send OTP via backend
-      await apiClient.post('/auth/send-otp', {
-        phoneNumber: `+91${phoneNumber}`, // Assuming India for now, or format based on input
-        // email: email // Optional: send to email too if provided?
-      });
 
-      setStep('verify-phone');
-    } catch (err) {
-      console.error('Send OTP error:', err);
-      setError(err.response?.data?.error || 'Failed to send verification code.');
-    } finally {
-      setLoading(false);
+    // Geofencing Check
+    if (businessLocation) {
+      if (!navigator.geolocation) {
+        setError('Geolocation is not supported by your browser. Cannot book appointment.');
+        setLoading(false);
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          const userLat = position.coords.latitude;
+          const userLng = position.coords.longitude;
+          const distance = calculateDistance(businessLocation.lat, businessLocation.lng, userLat, userLng);
+
+          if (distance > 100) {
+            setError(`You must be within 100 meters of the business to book. You are currently ${Math.round(distance)} meters away.`);
+            setLoading(false);
+            return;
+          }
+
+          // If within distance, proceed with booking
+          await submitBooking();
+        },
+        (err) => {
+          console.error("Geolocation error:", err);
+          setError('Failed to get your location. Please grant location permissions to book.');
+          setLoading(false);
+        },
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+      );
+    } else {
+      // Business hasn't set location, allow booking directly
+      console.warn('Business location not set. Bypassing geofencing.');
+      await submitBooking();
     }
   };
 
-  const handleVerifyAndBook = async (e) => {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
-
+  const submitBooking = async () => {
     try {
-      // 1. Verify OTP
-      await apiClient.post('/auth/verify-otp', {
-        phoneNumber: `+91${phoneNumber}`,
-        otp
-      });
-
-      // 2. Proceed with Booking
       const result = await bookAppointment(
         businessId,
         patientName.trim(),
@@ -98,11 +126,10 @@ function BookingPage() {
       setPatientName('');
       setPhoneNumber('');
       setEmail('');
-      setOtp('');
-      setStep('select-service'); // Reset for next booking (or keep on success screen)
+      setStep('select-service');
     } catch (err) {
-      console.error('Verification/Booking error:', err);
-      setError(err.response?.data?.error || 'Verification failed. Please try again.');
+      console.error('Booking error:', err);
+      setError(err.response?.data?.error || 'Booking failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -111,14 +138,12 @@ function BookingPage() {
   const isSuccess = !!success;
 
   return (
-    <div className="max-w-4xl mx-auto px-4 relative pt-10">
-      {/* Persistent Back Button to Directory */}
-      <Link
-        to="/explore"
-        className="absolute top-0 left-4 flex items-center gap-2 text-slate-500 hover:text-white transition-colors text-sm font-medium group"
-      >
-        <span className="group-hover:-translate-x-1 transition-transform">←</span> Back to Directory
-      </Link>
+    <div className="max-w-4xl mx-auto px-4 relative pt-10 min-h-screen">
+      {businessName && (
+        <div className="text-center mb-8">
+          <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-indigo-500">{businessName}</h1>
+        </div>
+      )}
 
       {step === 'select-service' && !isSuccess ? (
         <>
@@ -138,13 +163,7 @@ function BookingPage() {
                 key={service._id}
                 onClick={() => {
                   setSelectedService(service);
-                  if (!user) {
-                    // Start guest booking flow (or login redirect if mandatory)
-                    // For now, allow guest booking with OTP
-                    setStep('details');
-                  } else {
-                    setStep('details');
-                  }
+                  setStep('details');
                 }}
                 className="group bg-slate-800/40 hover:bg-slate-800 border border-slate-700 hover:border-indigo-500/50 p-6 rounded-2xl transition-all text-left flex justify-between items-center"
               >
@@ -183,7 +202,7 @@ function BookingPage() {
           <div className="flex justify-between items-center mb-8">
             <div>
               <h2 className="text-xl font-bold text-white">
-                {isSuccess ? 'Booking Confirmed' : step === 'verify-phone' ? 'Verify Phone' : 'Enter Details'}
+                {isSuccess ? 'Booking Confirmed' : 'Enter Details'}
               </h2>
               <p className="text-slate-400 text-sm mt-0.5">
                 {selectedService ? `For ${selectedService.name}` : ''}
@@ -192,8 +211,7 @@ function BookingPage() {
             {!isSuccess && (
               <button
                 onClick={() => {
-                  if (step === 'verify-phone') setStep('details');
-                  else setStep('select-service');
+                  setStep('select-service');
                   setError('');
                 }}
                 className="text-slate-500 hover:text-slate-300 text-sm font-bold flex items-center gap-2 transition-colors"
@@ -239,64 +257,23 @@ function BookingPage() {
                   </button>
                 </div>
               </div>
-            ) : step === 'verify-phone' ? (
-              <form onSubmit={handleVerifyAndBook} className="space-y-6">
-                <div className="text-center mb-4">
-                  <p className="text-slate-300 text-sm">
-                    Enter the code sent to <span className="font-bold text-white">+91 {phoneNumber}</span>
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase ml-1">SMS Code</label>
+            ) : (
+              <form onSubmit={handleBooking} className="space-y-5">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-slate-400 ml-1" htmlFor="patientName">
+                    Full Name
+                  </label>
                   <input
+                    id="patientName"
                     type="text"
-                    inputMode="numeric"
-                    className="w-full bg-slate-900/50 border border-slate-700 px-5 py-3.5 rounded-2xl text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 transition-all font-bold text-center text-2xl tracking-[0.5em]"
-                    placeholder="000000"
-                    value={otp}
-                    onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    className="w-full px-4 py-3 rounded-lg bg-slate-900 border border-slate-700 text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                    value={patientName}
+                    onChange={(e) => setPatientName(e.target.value)}
+                    placeholder="e.g. John Doe"
                     required
-                    autoFocus
+                    disabled={loading}
                   />
                 </div>
-
-                <button
-                  type="submit"
-                  disabled={loading || otp.length !== 6}
-                  className="w-full py-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-lg transition-all active:scale-[0.98] shadow-lg shadow-indigo-600/20 disabled:opacity-50"
-                >
-                  {loading ? 'Verifying...' : 'Verify & Book →'}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleSendOTP}
-                  disabled={loading}
-                  className="w-full text-center text-sm text-indigo-400 hover:text-indigo-300 mt-2"
-                >
-                  Resend Code
-                </button>
-              </form>
-            ) : (
-              <form onSubmit={handleSendOTP} className="space-y-5">
-                {(!user || !patientName) && (
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium text-slate-400 ml-1" htmlFor="patientName">
-                      Full Name
-                    </label>
-                    <input
-                      id="patientName"
-                      type="text"
-                      className="w-full px-4 py-3 rounded-lg bg-slate-900 border border-slate-700 text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                      value={patientName}
-                      onChange={(e) => setPatientName(e.target.value)}
-                      placeholder="e.g. John Doe"
-                      required
-                      disabled={loading}
-                    />
-                  </div>
-                )}
 
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium text-slate-400 ml-1" htmlFor="phoneNumber">
@@ -317,39 +294,37 @@ function BookingPage() {
                   />
                 </div>
 
-                {(!user || !email) && (
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium text-slate-400 ml-1" htmlFor="email">
-                      Email Address (Optional)
-                    </label>
-                    <input
-                      id="email"
-                      type="email"
-                      className="w-full px-4 py-3 rounded-lg bg-slate-900 border border-slate-700 text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="john@example.com"
-                      disabled={loading}
-                    />
-                  </div>
-                )}
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-slate-400 ml-1" htmlFor="email">
+                    Email Address (Optional)
+                  </label>
+                  <input
+                    id="email"
+                    type="email"
+                    className="w-full px-4 py-3 rounded-lg bg-slate-900 border border-slate-700 text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="john@example.com"
+                    disabled={loading}
+                  />
+                </div>
 
                 <button
                   type="submit"
-                  className="w-full py-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-lg transition-all active:scale-[0.98] shadow-lg shadow-indigo-600/20 disabled:opacity-50 mt-4"
+                  className="w-full py-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-lg transition-all active:scale-[0.98] shadow-lg shadow-emerald-600/20 disabled:opacity-50 mt-4"
                   disabled={loading || phoneNumber.length !== 10 || !patientName.trim()}
                 >
                   {loading ? (
                     <span className="flex items-center justify-center gap-2">
-                      Sending Code...
+                      Booking...
                     </span>
                   ) : (
-                    'Get OTP →'
+                    'Confirm Booking ✓'
                   )}
                 </button>
                 <div className="text-center">
                   <p className="text-xs text-slate-500 mt-2">
-                    Verify your number to confirm booking.
+                    Enter your phone number to confirm your booking.
                   </p>
                 </div>
               </form>
