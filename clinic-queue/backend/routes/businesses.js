@@ -41,6 +41,63 @@ router.get('/', async (req, res) => {
     }
 });
 
+// Get businesses for the logged-in user (superadmin sees ALL)
+router.get('/user', async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
+
+        const token = authHeader.split(' ')[1];
+        const jwt = require('jsonwebtoken');
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+        if (decoded.isSuperAdmin) {
+            // Superadmin: return ALL businesses with creator info
+            const snapshot = await BUSINESSES.get();
+            const businesses = [];
+
+            for (const doc of snapshot.docs) {
+                const data = doc.data();
+                let creatorName = 'Unknown';
+                let creatorEmail = 'N/A';
+
+                // Find the admin user who created this business
+                const userSnap = await USERS.where('businessId', '==', doc.id).where('role', '==', 'admin').limit(1).get();
+                if (!userSnap.empty) {
+                    const userData = userSnap.docs[0].data();
+                    creatorName = userData.name || 'Unknown';
+                    creatorEmail = userData.email || 'N/A';
+                }
+
+                businesses.push({
+                    _id: doc.id,
+                    ...data,
+                    creatorName,
+                    creatorEmail,
+                    createdAt: data.createdAt?._seconds ? new Date(data.createdAt._seconds * 1000).toISOString() : null
+                });
+            }
+
+            return res.json(businesses);
+        }
+
+        // Regular admin: return only their businesses
+        const userSnap = await USERS.doc(decoded.userId).get();
+        if (!userSnap.exists) return res.json([]);
+
+        const userData = userSnap.data();
+        if (!userData.businessId) return res.json([]);
+
+        const bizDoc = await BUSINESSES.doc(userData.businessId).get();
+        if (!bizDoc.exists) return res.json([]);
+
+        return res.json([{ _id: bizDoc.id, ...bizDoc.data() }]);
+    } catch (error) {
+        console.error('Error fetching user businesses:', error);
+        res.status(500).json({ error: 'Failed to fetch businesses' });
+    }
+});
+
 // Get business by ID for public info
 router.get('/:id', async (req, res) => {
     try {
@@ -121,6 +178,23 @@ router.delete('/:id', requireSuperAdmin, async (req, res) => {
     } catch (error) {
         console.error('❌ Error deleting business:', error);
         res.status(500).json({ error: 'Failed to delete business and its data' });
+    }
+});
+
+// RENEW/ACTIVATE a business subscription — SuperAdmin only
+router.post('/:id/renew', requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        await BUSINESSES.doc(id).update({
+            'subscription.status': 'paid',
+            'subscription.renewedAt': admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        res.json({ success: true, message: 'Business subscription renewed successfully' });
+    } catch (error) {
+        console.error('Error renewing business:', error);
+        res.status(500).json({ error: 'Failed to renew business subscription' });
     }
 });
 

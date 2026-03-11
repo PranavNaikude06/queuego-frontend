@@ -32,6 +32,7 @@ router.post('/business-signup', async (req, res) => {
             name: businessName,
             slug,
             email,
+            subscription: { status: 'trial', trialStartDate: new Date().toISOString() },
             createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
         const businessId = businessRef.id;
@@ -123,6 +124,7 @@ router.post('/business-signup-firebase', async (req, res) => {
             email: email.toLowerCase(),
             address: req.body.address || '',
             location: req.body.location || null, // { lat, lng }
+            subscription: { status: 'trial', trialStartDate: new Date().toISOString() },
             createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
         const businessId = businessRef.id;

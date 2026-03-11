@@ -16,14 +16,17 @@ const BUSINESSES = db.collection('businesses');
 router.get('/qr', async (req, res) => {
   try {
     const { businessId } = req.params;
-    const protocol = req.protocol;
-    const host = req.get('host');
+    const { type } = req.query; // type can be 'display'
 
-    // Generate the join link using the frontend URL (for now, assuming standard setup or env var)
+    // Generate the URL using the frontend URL (for now, assuming standard setup or env var)
     const frontendDomain = process.env.FRONTEND_URL || 'https://queuego.vercel.app'; // Or another default domain
-    const joinUrl = `${frontendDomain}/join/${businessId}`;
 
-    const qrDataUrl = await QRCode.toDataURL(joinUrl, {
+    let targetUrl = `${frontendDomain}/join/${businessId}`;
+    if (type === 'display') {
+      targetUrl = `${frontendDomain}/display/${businessId}`;
+    }
+
+    const qrDataUrl = await QRCode.toDataURL(targetUrl, {
       color: {
         dark: '#4f46e5', // indigo-600
         light: '#0000', // transparent
@@ -32,7 +35,7 @@ router.get('/qr', async (req, res) => {
       width: 400,
     });
 
-    res.json({ qrCode: qrDataUrl, url: joinUrl });
+    res.json({ qrCode: qrDataUrl, url: targetUrl });
   } catch (error) {
     console.error('QR Generate error:', error);
     res.status(500).json({ error: 'Failed to generate QR code' });
@@ -104,8 +107,8 @@ router.post('/book', bookingLimiter, async (req, res) => {
     const { patientName, phoneNumber, serviceId, email } = req.body;
     const { businessId } = req.params;
 
-    if (!patientName || !phoneNumber || !serviceId) {
-      return res.status(400).json({ error: 'Patient name, phone number, and service are required' });
+    if (!patientName || !phoneNumber) {
+      return res.status(400).json({ error: 'Patient name and phone number are required' });
     }
 
     // Input Validation
@@ -148,7 +151,7 @@ router.post('/book', bookingLimiter, async (req, res) => {
       const newApptRef = APPOINTMENTS.doc();
       const apptData = {
         businessId,
-        serviceId,
+        serviceId: serviceId || 'default',
         patientName: patientName.trim(),
         phoneNumber: phoneNumber.trim(),
         email: email || '', // Store email for notifications

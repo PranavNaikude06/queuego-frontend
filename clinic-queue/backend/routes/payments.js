@@ -16,95 +16,112 @@ const razorpay = new Razorpay({
     key_secret: process.env.RAZORPAY_KEY_SECRET
 });
 
-// 1. Create Subscription
-router.post('/create-subscription', async (req, res) => {
+// 1. Create Order (One-time or recurring renewal)
+router.post('/create-order', async (req, res) => {
     try {
-        const { userId } = req.body;
-        const planId = process.env.RAZORPAY_PLAN_ID || 'plan_SCvXFCCdyap7PV';
+        const { amount, currency = 'INR', businessId } = req.body;
 
-        if (!userId) {
-            return res.status(400).json({ error: 'User ID is required' });
-        }
-
-        const subscription = await razorpay.subscriptions.create({
-            plan_id: planId,
-            customer_notify: 1,
-            total_count: 120, // 10 years (or make it infinite/large)
-            quantity: 1,
+        const order = await razorpay.orders.create({
+            amount: (amount || 199) * 100, // Amount in paise
+            currency,
+            receipt: `receipt_${Date.now()}`,
             notes: {
-                userId: userId
+                businessId: businessId || ''
             }
         });
 
         res.json({
             success: true,
-            subscription_id: subscription.id,
-            key_id: process.env.RAZORPAY_KEY_ID // Send key to frontend
+            order_id: order.id,
+            amount: order.amount,
+            key_id: process.env.RAZORPAY_KEY_ID
         });
 
     } catch (error) {
-        console.error('Create Subscription Error:', error);
-        res.status(500).json({ error: 'Failed to create subscription' });
+        console.error('Create Order Error:', error);
+        res.status(500).json({ error: 'Failed to create payment order' });
     }
 });
 
-// 2. Verify Payment & Activate
-router.post('/verify-subscription', async (req, res) => {
+// 2. Verify Payment & Activate (Handles both Users and Businesses)
+router.post('/verify-payment', async (req, res) => {
     try {
         const {
             razorpay_payment_id,
-            razorpay_subscription_id,
+            razorpay_order_id,
             razorpay_signature,
-            userId
+            userId,
+            businessId
         } = req.body;
 
         // Verify Signature
         const generated_signature = crypto
             .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
-            .update(razorpay_payment_id + '|' + razorpay_subscription_id)
+            .update(razorpay_order_id + '|' + razorpay_payment_id)
             .digest('hex');
 
         if (generated_signature !== razorpay_signature) {
             return res.status(400).json({ error: 'Invalid signature' });
         }
 
-        // Signature valid -> Payment Successful
-        // Update User Subscription in Firestore
-        // Calculate Expiry (30 Days from now as fall back, though subscription handles recurring)
-        // Ideally rely on webhooks, but for immediate UI update:
         const expiryDate = new Date();
         expiryDate.setDate(expiryDate.getDate() + 30);
 
-        await USERS.doc(userId).update({
-            subscription: {
-                status: 'premium',
-                plan: 'monthly',
-                provider: 'razorpay',
-                subscriptionId: razorpay_subscription_id, // Store for managing cancellations
-                expiry: admin.firestore.Timestamp.fromDate(expiryDate),
-                updatedAt: admin.firestore.FieldValue.serverTimestamp()
-            }
-        });
+        // Activates Business if businessId is provided
+        if (businessId) {
+            const BUSINESSES = db.collection('businesses');
+            await BUSINESSES.doc(businessId).update({
+                subscription: {
+                    status: 'paid',
+                    provider: 'razorpay',
+                    paymentId: razorpay_payment_id,
+                    orderId: razorpay_order_id,
+                    expiry: admin.firestore.Timestamp.fromDate(expiryDate),
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                }
+            });
+        }
+
+        // Activates User Premium if userId is provided
+        if (userId) {
+            await USERS.doc(userId).update({
+                subscription: {
+                    status: 'premium',
+                    provider: 'razorpay',
+                    paymentId: razorpay_payment_id,
+                    orderId: razorpay_order_id,
+                    expiry: admin.firestore.Timestamp.fromDate(expiryDate),
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                }
+            });
+        }
 
         // Record Transaction
         await PAYMENT_REQUESTS.add({
-            userId,
+            userId: userId || 'business_admin',
+            businessId: businessId || '',
             paymentId: razorpay_payment_id,
-            subscriptionId: razorpay_subscription_id,
-            amount: 100,
+            orderId: razorpay_order_id,
+            amount: 199,
             status: 'success',
             createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
         res.json({
             success: true,
-            message: 'Subscription activated successfully!'
+            message: 'Payment verified and subscription activated!'
         });
 
     } catch (error) {
         console.error('Verification Error:', error);
         res.status(500).json({ error: 'Payment verification failed' });
     }
+});
+
+// Keep legacy routes for backward compatibility
+router.post('/create-subscription', async (req, res) => {
+    /* ... existing implementation if needed, but redirects to create-order or similar ... */
+    res.status(410).json({ error: 'Please use /create-order instead' });
 });
 
 module.exports = router;

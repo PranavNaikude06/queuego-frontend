@@ -18,6 +18,10 @@ if (missing.length > 0) {
 initializeFirebase();
 
 const app = express();
+
+// Trust proxy for rate limiting (Render/Vercel)
+app.set('trust proxy', 1);
+
 const PORT = config.PORT;
 
 app.use(cors({
@@ -28,15 +32,16 @@ app.use(cors({
     const allowedOrigins = [
       process.env.FRONTEND_URL,
       'http://localhost:5173',
+      'http://localhost:5174',
       'http://localhost:3000',
       'capacitor://localhost',
       'http://localhost',  // Android WebView origin
       'https://localhost', // Some Capacitor versions
       'http://localhost:8080'
-    ].filter(Boolean);
+    ].filter(Boolean).map(url => url.replace(/\/$/, ''));
 
     // Check if origin is allowed
-    const isAllowed = allowedOrigins.some(ao => origin.startsWith(ao));
+    const isAllowed = allowedOrigins.some(ao => origin === ao || origin.startsWith(ao + '/'));
 
     if (isAllowed) {
       callback(null, true);
