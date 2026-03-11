@@ -136,6 +136,29 @@ router.patch('/:id', async (req, res) => {
     }
 });
 
+// APPROVE a business — SuperAdmin only
+router.patch('/:id/approve', requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        const doc = await BUSINESSES.doc(id).get();
+        if (!doc.exists) {
+            return res.status(404).json({ error: 'Business not found' });
+        }
+
+        await BUSINESSES.doc(id).update({
+            isApproved: true,
+            'subscription.status': 'trial',
+            'subscription.trialStartDate': new Date().toISOString(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        res.json({ success: true, message: 'Business approved successfully' });
+    } catch (error) {
+        console.error('Error approving business:', error);
+        res.status(500).json({ error: 'Failed to approve business' });
+    }
+});
+
 // DELETE a business and all its data — SuperAdmin only
 router.delete('/:id', requireSuperAdmin, async (req, res) => {
     const { id } = req.params;

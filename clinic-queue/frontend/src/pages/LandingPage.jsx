@@ -50,6 +50,21 @@ function LandingPage() {
         }
     };
 
+    const handleApprove = async (businessId) => {
+        if (!window.confirm('Approve this business? This will start their 15-day trial immediately.')) return;
+
+        try {
+            await apiClient.patch(`/businesses/${businessId}/approve`);
+            alert('Business approved successfully!');
+            // Refresh the list
+            const response = await apiClient.get('/businesses/user');
+            setBusinesses(response.data);
+        } catch (err) {
+            console.error('Error approving business:', err);
+            alert('Failed to approve business.');
+        }
+    };
+
     const formatDate = (dateStr) => {
         if (!dateStr) return 'Unknown';
         const d = new Date(dateStr);
@@ -111,8 +126,12 @@ function LandingPage() {
                                 <p className="text-slate-400 text-sm mb-2 leading-relaxed">
                                     {business.address || 'No address provided'}
                                 </p>
-                                {/* Trial Badge */}
+                                {/* Trial Badge / Approval Badge */}
                                 {(() => {
+                                    if (business.isApproved === false) {
+                                        return <span className="inline-block text-[10px] bg-red-900/40 text-red-300 px-2 py-0.5 rounded-full font-bold mb-3 border border-red-500/30 animate-pulse">⚠️ Pending Admin Approval</span>;
+                                    }
+
                                     const sub = business.subscription;
                                     if (sub?.status === 'paid') return <span className="inline-block text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full font-bold mb-3">✅ Active Subscription</span>;
 
@@ -165,10 +184,18 @@ function LandingPage() {
                                         View Live Queue →
                                     </Link>
                                 )}
-                                {isSuperAdmin && business.subscription?.status !== 'paid' && (
+                                {isSuperAdmin && business.isApproved === false && (
+                                    <button
+                                        onClick={() => handleApprove(business._id)}
+                                        className="text-white font-bold text-sm bg-indigo-600 hover:bg-indigo-500 py-2 px-4 rounded-xl inline-flex items-center justify-center w-full transition-all shadow-lg shadow-indigo-600/30 mb-2"
+                                    >
+                                        ✅ Approve Business
+                                    </button>
+                                )}
+                                {isSuperAdmin && business.subscription?.status !== 'paid' && business.isApproved !== false && (
                                     <button
                                         onClick={() => handleRenew(business._id)}
-                                        className="text-amber-400 font-bold text-sm bg-amber-500/10 py-2 px-4 rounded-xl inline-flex items-center justify-center w-full hover:bg-amber-500/20 transition-colors"
+                                        className="text-amber-400 font-bold text-sm bg-amber-500/10 py-2 px-4 rounded-xl inline-flex items-center justify-center w-full hover:bg-amber-500/20 transition-colors mt-2"
                                     >
                                         👑 Renew Subscription
                                     </button>
