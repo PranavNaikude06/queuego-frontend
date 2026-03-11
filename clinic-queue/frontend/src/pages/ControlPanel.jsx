@@ -586,12 +586,6 @@ function ControlPanel() {
             Queue Management
           </button>
           <button
-            onClick={() => setActiveTab('services')}
-            className={`px-6 py-3 font-bold text-sm transition-all border-b-2 ${activeTab === 'services' ? 'text-indigo-400 border-indigo-400' : 'text-slate-500 border-transparent hover:text-slate-300'}`}
-          >
-            Service Catalog
-          </button>
-          <button
             onClick={() => setActiveTab('settings')}
             className={`px-6 py-3 font-bold text-sm transition-all border-b-2 ${activeTab === 'settings' ? 'text-indigo-400 border-indigo-400' : 'text-slate-500 border-transparent hover:text-slate-300'}`}
           >
@@ -722,85 +716,6 @@ function ControlPanel() {
                   </div>
                 )}
               </div>
-            </div>
-          </div>
-        ) : activeTab === 'services' ? (
-          <div className="grid md:grid-cols-3 gap-6">
-            <div className="md:col-span-1">
-              {/* ... (existing service form) */}
-              <div className="bg-slate-800 rounded-2xl p-6 border border-slate-700 sticky top-6">
-                <h3 className="font-bold text-white mb-6 flex items-center gap-2">
-                  <span className="p-1.5 rounded bg-emerald-500/10 text-emerald-500">✚</span>
-                  Add New Service
-                </h3>
-                <form onSubmit={handleAddService} className="space-y-4">
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Name</label>
-                    <input
-                      type="text"
-                      required
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white focus:border-indigo-500 outline-none"
-                      value={serviceForm.name}
-                      onChange={e => setServiceForm({ ...serviceForm, name: e.target.value })}
-                      placeholder="e.g. Haircut"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Price (₹)</label>
-                      <input
-                        type="number"
-                        required
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white focus:border-indigo-500 outline-none"
-                        value={serviceForm.price}
-                        onChange={e => setServiceForm({ ...serviceForm, price: e.target.value })}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Duration (min)</label>
-                      <input
-                        type="number"
-                        required
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white focus:border-indigo-500 outline-none"
-                        value={serviceForm.duration}
-                        onChange={e => setServiceForm({ ...serviceForm, duration: e.target.value })}
-                      />
-                    </div>
-                  </div>
-                  <button type="submit" className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-emerald-600/10" disabled={processing}>
-                    {processing ? 'Saving...' : 'Save Service'}
-                  </button>
-                </form>
-              </div>
-            </div>
-
-            <div className="md:col-span-2 space-y-4">
-              {services.map(s => (
-                <div key={s._id} className="bg-slate-800 border border-slate-700 rounded-2xl p-5 flex justify-between items-center group">
-                  <div>
-                    <div className="font-bold text-white text-lg">{s.name}</div>
-                    <div className="flex gap-4 text-xs text-slate-500 mt-1">
-                      <span>₹{s.price}</span>
-                      <span>•</span>
-                      <span>{s.duration} mins</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <button
-                      onClick={() => toggleServiceStatus(s._id, s.isActive)}
-                      className={`px-3 py-1 my-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${s.isActive ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-700 text-slate-400 border border-slate-600'}`}
-                      disabled={processing}
-                    >
-                      {s.isActive ? 'Active' : 'Inactive'}
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {services.length === 0 && (
-                <div className="p-12 text-center bg-slate-800/20 rounded-3xl border border-dashed border-slate-700">
-                  <p className="text-slate-500">No services defined yet.</p>
-                </div>
-              )}
             </div>
           </div>
         ) : (
