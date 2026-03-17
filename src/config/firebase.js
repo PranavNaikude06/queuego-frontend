@@ -1,0 +1,50 @@
+import { initializeApp } from "firebase/app";
+import {
+    getAuth,
+    GoogleAuthProvider,
+    signInWithPopup,
+    sendSignInLinkToEmail,
+    signInWithEmailLink,
+    isSignInWithEmailLink,
+    onAuthStateChanged,
+    signOut,
+    signInWithEmailAndPassword,
+    createUserWithEmailAndPassword,
+    sendPasswordResetEmail,
+    signInWithCredential
+} from "firebase/auth";
+import { getMessaging, getToken, onMessage } from "firebase/messaging";
+
+const firebaseConfig = {
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const messaging = typeof window !== 'undefined' ? getMessaging(app) : null;
+const googleProvider = new GoogleAuthProvider();
+
+export {
+    auth,
+    googleProvider,
+    signInWithPopup,
+    sendSignInLinkToEmail,
+    sendSignInLinkToEmail as sendLoginLink,
+    signInWithEmailLink,
+    isSignInWithEmailLink,
+    onAuthStateChanged,
+    signOut,
+    createUserWithEmailAndPassword,
+    signInWithEmailAndPassword,
+    sendPasswordResetEmail,
+    signInWithCredential,
+    GoogleAuthProvider,
+    messaging,
+    getToken,
+    onMessage
+};
