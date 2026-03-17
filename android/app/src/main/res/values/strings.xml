@@ -1,8 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">QueueGo</string>
-    <string name="title_activity_main">QueueGo</string>
-    <string name="package_name">com.queuego.app</string>
-    <string name="custom_url_scheme">com.queuego.app</string>
-    <string name="server_client_id">547597389849-p4377e7516a141d2jg4m58emg236rdru.apps.googleusercontent.com</string>
-</resources>
