@@ -395,7 +395,7 @@ function ControlPanel() {
     try {
       // 1. Create order on backend
       const { data: orderData } = await apiClient.post('/payments/create-order', {
-        amount: 199,
+        amount: 600,
         businessId: businessId
       });
 
@@ -464,7 +464,7 @@ function ControlPanel() {
             Your 15-day free trial has ended. To continue managing your queue and accessing all features, please subscribe.
           </p>
           <div className="bg-slate-900/60 rounded-2xl border border-slate-700 p-6 space-y-2">
-            <div className="text-emerald-400 font-bold text-3xl">₹199<span className="text-base text-slate-500 font-normal">/month</span></div>
+            <div className="text-emerald-400 font-bold text-3xl">₹600<span className="text-base text-slate-500 font-normal">/month</span></div>
             <p className="text-slate-500 text-xs">Unlimited queue management, QR codes, analytics & more</p>
           </div>
           <button
@@ -472,7 +472,7 @@ function ControlPanel() {
             disabled={processing}
             className="block w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold text-lg hover:shadow-lg hover:shadow-emerald-500/25 transition-all active:scale-95 disabled:opacity-50"
           >
-            {processing ? 'Processing...' : 'Pay ₹199 to Continue →'}
+            {processing ? 'Processing...' : 'Pay ₹600 to Continue →'}
           </button>
           <button
             onClick={() => navigate('/')}
@@ -497,7 +497,7 @@ function ControlPanel() {
               disabled={processing}
               className="text-xs bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-lg hover:bg-emerald-500/30 transition-colors disabled:opacity-50"
             >
-              {processing ? '...' : 'Subscribe — ₹199/mo'}
+              {processing ? '...' : 'Subscribe — ₹600/mo'}
             </button>
           </div>
         )}

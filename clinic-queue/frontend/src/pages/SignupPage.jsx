@@ -241,7 +241,7 @@ function SignupPage() {
 
                     <p className="text-center text-slate-500 text-[10px] mt-6 leading-relaxed">
                         By signing up, you agree to our Terms of Service.<br />
-                        Try completely FREE for 15 days — then just ₹199/month.
+                        Try completely FREE for 15 days — then just ₹600/month.
                     </p>
                 </form>
             </div>
